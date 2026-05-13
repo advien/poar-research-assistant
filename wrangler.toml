@@ -1,0 +1,35 @@
+# =============================================================================
+# Cloudflare Workers config for POAR Research Assistant
+# Deployed via @opennextjs/cloudflare. The actual build output is consumed by
+# `npm run cf:build` -> `npm run cf:deploy`.
+# Secrets (ANTHROPIC_API_KEY, OPENAI_API_KEY, SUPABASE_SERVICE_ROLE_KEY) are
+# stored via `wrangler secret put` or in the Cloudflare dashboard, NOT here.
+# =============================================================================
+
+name = "poar-research-assistant"
+compatibility_date = "2025-04-01"
+compatibility_flags = ["nodejs_compat"]
+main = ".open-next/worker.js"
+
+# Asset bindings emitted by @opennextjs/cloudflare's build step.
+[assets]
+directory = ".open-next/assets"
+binding = "ASSETS"
+
+# Public env vars (safe to commit; secrets go through `wrangler secret put`).
+[vars]
+NEXT_PUBLIC_APP_URL = "https://research.advien.tech"
+
+# -----------------------------------------------------------------------------
+# Per-environment overrides
+# -----------------------------------------------------------------------------
+[env.preview]
+name = "poar-research-assistant-preview"
+[env.preview.vars]
+NEXT_PUBLIC_APP_URL = "https://preview.research.advien.tech"
+
+[env.production]
+name = "poar-research-assistant"
+route = { pattern = "research.advien.tech", custom_domain = true }
+[env.production.vars]
+NEXT_PUBLIC_APP_URL = "https://research.advien.tech"

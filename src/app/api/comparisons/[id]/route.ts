@@ -1,0 +1,81 @@
+import { NextResponse } from "next/server";
+import { z } from "zod";
+import { createClient } from "@/lib/supabase/server";
+
+type Params = { params: Promise<{ id: string }> };
+const Patch = z.object({
+  pinned: z.boolean().optional(),
+  archived: z.boolean().optional(),
+  title: z.string().min(1).max(200).optional(),
+});
+
+export async function GET(_req: Request, { params }: Params) {
+  const { id } = await params;
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+
+  const { data, error } = await supabase
+    .from("paper_comparisons")
+    .select(
+      "id,user_id,paper_a_id,paper_b_id,version,payload,citations,similarity_score,stronger_paper,contradiction_count,title,pinned,archived,model,prompt_version,created_at,updated_at"
+    )
+    .eq("id", id)
+    .single();
+  if (error || !data) return NextResponse.json({ error: "not_found" }, { status: 404 });
+
+  const { data: papers } = await supabase
+    .from("papers")
+    .select("id,title,authors,year")
+    .in("id", [data.paper_a_id, data.paper_b_id]);
+  const byId = new Map((papers ?? []).map((p) => [p.id, p]));
+
+  return NextResponse.json({
+    comparison: data,
+    paper_a: byId.get(data.paper_a_id) ?? null,
+    paper_b: byId.get(data.paper_b_id) ?? null,
+  });
+}
+
+export async function PATCH(req: Request, { params }: Params) {
+  const { id } = await params;
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+
+  let patch: z.infer<typeof Patch>;
+  try {
+    patch = Patch.parse(await req.json());
+  } catch (e) {
+    return NextResponse.json({ error: "bad_request", detail: String(e) }, { status: 400 });
+  }
+  if (Object.keys(patch).length === 0) {
+    return NextResponse.json({ error: "no_fields" }, { status: 400 });
+  }
+
+  const { data, error } = await supabase
+    .from("paper_comparisons")
+    .update(patch)
+    .eq("id", id)
+    .select("id,pinned,archived,title,updated_at")
+    .single();
+  if (error || !data) return NextResponse.json({ error: error?.message ?? "not_found" }, { status: 404 });
+  return NextResponse.json(data);
+}
+
+export async function DELETE(_req: Request, { params }: Params) {
+  const { id } = await params;
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+
+  const { error } = await supabase.from("paper_comparisons").delete().eq("id", id);
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  return NextResponse.json({ ok: true });
+}

@@ -1,0 +1,78 @@
+{
+  "name": "poar-research-assistant",
+  "version": "0.1.0",
+  "private": true,
+  "description": "AI-powered biomedical research workspace for prosthetics, orthotics, assistive robotics, biomechanics, and rehabilitation engineering literature.",
+  "keywords": [
+    "prosthetics",
+    "orthotics",
+    "assistive-robotics",
+    "rehabilitation-robotics",
+    "wearable-robotics",
+    "biomechatronics",
+    "biomechanics",
+    "rehabilitation-engineering",
+    "rag",
+    "research-assistant",
+    "next.js",
+    "supabase",
+    "anthropic",
+    "openai",
+    "pgvector"
+  ],
+  "homepage": "https://research.advien.tech",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/advien/poar-research-assistant.git"
+  },
+  "bugs": {
+    "url": "https://github.com/advien/poar-research-assistant/issues"
+  },
+  "author": "advien",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "typecheck": "tsc --noEmit",
+    "check": "npm run lint && npm run typecheck",
+    "db:reset": "supabase db reset",
+    "db:push": "supabase db push",
+    "db:types": "supabase gen types typescript --local > src/types/db.ts",
+    "cf:build": "npx @opennextjs/cloudflare@latest build",
+    "cf:preview": "npx @opennextjs/cloudflare@latest preview",
+    "cf:deploy": "npx @opennextjs/cloudflare@latest deploy"
+  },
+  "dependencies": {
+    "@ai-sdk/anthropic": "^1.0.0",
+    "@supabase/ssr": "^0.6.1",
+    "@supabase/supabase-js": "^2.45.0",
+    "ai": "^4.0.0",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "lucide-react": "^0.460.0",
+    "next": "^15.1.0",
+    "openai": "^4.71.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-dropzone": "^14.3.5",
+    "react-pdf": "^9.1.1",
+    "tailwind-merge": "^2.5.4",
+    "unpdf": "^0.12.1",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.0.0",
+    "@types/node": "^22.10.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "eslint": "^9.16.0",
+    "eslint-config-next": "^15.1.0",
+    "tailwindcss": "^4.0.0",
+    "typescript": "^5.7.0"
+  }
+}
