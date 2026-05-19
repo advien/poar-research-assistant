@@ -1,0 +1,66 @@
+[
+  {
+    "id": "dataset-1",
+    "question": "What dataset was used to train the controller?",
+    "expected_keywords": ["dataset", "subjects", "recordings"],
+    "expected_answer_contains": ["dataset"],
+    "expect_no_context": false,
+    "notes": "Canonical RAG smoke test. Should retrieve a chunk that names the dataset and surface it in the cited answer."
+  },
+  {
+    "id": "amp-level-1",
+    "question": "What amputation level is studied in this paper?",
+    "expected_keywords": ["transtibial", "transfemoral", "amputation"],
+    "expected_answer_contains": ["transtibial"],
+    "expect_no_context": false,
+    "notes": "Probes domain-specific terminology recall. The retriever should surface the methods / population chunk."
+  },
+  {
+    "id": "device-1",
+    "question": "Which prosthesis or orthosis was tested?",
+    "expected_keywords": ["prosthesis", "orthosis", "exoskeleton", "AFO", "device"],
+    "expected_answer_contains": ["device"],
+    "expect_no_context": false,
+    "notes": "Generic device-identification probe. Tests whether the methods / device chunk wins over the abstract."
+  },
+  {
+    "id": "outcome-1",
+    "question": "What outcome measures were reported?",
+    "expected_keywords": ["6MWT", "PEQ", "metabolic", "kinematic", "kinetic", "ROM"],
+    "expected_answer_contains": ["measure"],
+    "expect_no_context": false,
+    "notes": "Numeric findings discovery. Tests retrieval against the results section."
+  },
+  {
+    "id": "limitations-1",
+    "question": "What were the main limitations of the study?",
+    "expected_keywords": ["limitation", "small", "sample", "future"],
+    "expected_answer_contains": ["limitation"],
+    "expect_no_context": false,
+    "notes": "Tests retrieval against discussion / limitations chunks."
+  },
+  {
+    "id": "out-of-corpus-1",
+    "question": "What does this paper say about quantum computing for prosthetics?",
+    "expected_keywords": [],
+    "expected_answer_contains": ["not", "context"],
+    "expect_no_context": true,
+    "notes": "Refusal probe: the corpus has nothing relevant; the answer must say so without fabricating citations."
+  },
+  {
+    "id": "out-of-corpus-2",
+    "question": "What is the historical origin of the term 'orthotics'?",
+    "expected_keywords": [],
+    "expected_answer_contains": ["not", "context"],
+    "expect_no_context": true,
+    "notes": "Refusal probe: out-of-paper history question. Should refuse rather than improvise."
+  },
+  {
+    "id": "control-1",
+    "question": "What control strategy was used for the powered prosthesis?",
+    "expected_keywords": ["impedance", "EMG", "intent", "controller", "PID"],
+    "expected_answer_contains": ["control"],
+    "expect_no_context": false,
+    "notes": "Robotics-specific retrieval probe."
+  }
+]
