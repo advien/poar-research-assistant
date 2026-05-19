@@ -36,7 +36,21 @@ export function UploadDropzone({ onUploadStart }: Props) {
       const supabase = createClient();
 
       for (const file of files) {
-        if (file.type !== "application/pdf") continue;
+        // Defence in depth: react-dropzone's `accept` already filters at the
+        // OS dialog, but a drag-and-drop or a renamed file can slip through.
+        // We surface a clear error instead of silently skipping.
+        if (file.type !== "application/pdf" || !/\.pdf$/i.test(file.name)) {
+          setPending((p) => [
+            ...p,
+            {
+              name: file.name,
+              size: file.size,
+              phase: "error",
+              message: "only .pdf files are supported",
+            },
+          ]);
+          continue;
+        }
 
         setPending((p) => [...p, { name: file.name, size: file.size, phase: "uploading" }]);
 
@@ -45,9 +59,19 @@ export function UploadDropzone({ onUploadStart }: Props) {
           const initRes = await fetch("/api/papers/upload", {
             method: "POST",
             headers: { "content-type": "application/json" },
-            body: JSON.stringify({ filename: file.name, size: file.size }),
+            body: JSON.stringify({
+              filename: file.name,
+              size: file.size,
+              content_type: file.type,
+            }),
           });
-          if (!initRes.ok) throw new Error(`upload init failed (${initRes.status})`);
+          if (!initRes.ok) {
+            // Surface the server's validation message (size, extension, MIME).
+            const j = await initRes.json().catch(() => ({}));
+            throw new Error(
+              j?.detail ?? j?.error ?? `upload init failed (${initRes.status})`
+            );
+          }
           const { paper_id, storage_path, token } = (await initRes.json()) as {
             paper_id: string;
             storage_path: string;
@@ -123,7 +147,7 @@ export function UploadDropzone({ onUploadStart }: Props) {
       <p className="text-sm">
         <span className="font-medium">Drop PDFs here</span> or click to browse
       </p>
-      <p className="text-xs text-muted-foreground">Up to 100 MB per file. PDFs only.</p>
+      <p className="text-xs text-muted-foreground">PDFs only. Up to 25 MB per file.</p>
       {pending.length > 0 && (
         <ul className="mt-4 space-y-1 text-left mx-auto max-w-md text-xs">
           {pending.map((p) => (

@@ -28,14 +28,61 @@ export type ChatRequest = z.infer<typeof ChatRequestSchema>;
 // =============================================================================
 // /api/papers/upload
 // =============================================================================
-export const UploadRequestSchema = z.object({
-  filename: z.string().min(1).max(256),
-  size: z
-    .number()
-    .int()
-    .positive()
-    .max(100 * 1024 * 1024, { message: "files larger than 100 MB are not accepted" }),
-});
+/**
+ * Hard cap on the upload size, in bytes. Defaults to 25 MiB - large enough
+ * for typical 30-page biomedical PDFs but well below the 100 MiB Workers
+ * request-body ceiling. Override per environment via `UPLOAD_MAX_BYTES`.
+ *
+ * NOTE: this only validates the *request metadata* (filename + size). The
+ * browser PUTs bytes directly to Supabase Storage with a single-shot signed
+ * URL, so the worker never streams the file body itself.
+ */
+const DEFAULT_UPLOAD_MAX_BYTES = 25 * 1024 * 1024;
+function uploadMaxBytes(): number {
+  const raw = process.env.UPLOAD_MAX_BYTES;
+  const n = raw ? Number.parseInt(raw, 10) : NaN;
+  return Number.isFinite(n) && n > 0 ? n : DEFAULT_UPLOAD_MAX_BYTES;
+}
+
+/** Allowed MIME types. Today only PDF; OCR / Word / Markdown is roadmap. */
+const ALLOWED_CONTENT_TYPES = new Set(["application/pdf"]);
+
+export const UploadRequestSchema = z
+  .object({
+    filename: z
+      .string()
+      .min(1)
+      .max(256)
+      // Reject control chars, path traversal, NUL bytes. Keeps the storage
+      // path safe and prevents `..` / `\\` shenanigans even though the bucket
+      // path is already prefixed by user_id.
+      .regex(/^[^/\\\x00-\x1f]+$/, {
+        message: "filename contains invalid characters",
+      })
+      .refine((s) => /\.pdf$/i.test(s), {
+        message: "only .pdf files are supported",
+      }),
+    size: z
+      .number()
+      .int()
+      .positive()
+      .refine((n) => n <= uploadMaxBytes(), {
+        message: `files larger than ${Math.round(uploadMaxBytes() / 1024 / 1024)} MB are not accepted`,
+      }),
+    /**
+     * Optional: the browser-reported Content-Type of the file. When present
+     * we enforce it must be `application/pdf`. We can't trust the browser
+     * but mismatched types are still a useful early-reject signal.
+     */
+    content_type: z
+      .string()
+      .max(128)
+      .refine((t) => ALLOWED_CONTENT_TYPES.has(t.toLowerCase()), {
+        message: "only application/pdf is accepted",
+      })
+      .optional(),
+  })
+  .strict();
 
 export type UploadRequest = z.infer<typeof UploadRequestSchema>;
 

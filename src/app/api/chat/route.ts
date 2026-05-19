@@ -16,6 +16,14 @@ import { classifyError, createRequestLogger, startTimer } from "@/lib/observabil
 export const runtime = "edge";
 export const maxDuration = 60;
 
+/** Per-answer output-token cap. Tunable via env to control cost / latency. */
+const DEFAULT_CHAT_MAX_OUTPUT_TOKENS = 2048;
+function chatMaxOutputTokens(): number {
+  const raw = process.env.CHAT_MAX_OUTPUT_TOKENS;
+  const n = raw ? Number.parseInt(raw, 10) : NaN;
+  return Number.isFinite(n) && n > 0 ? n : DEFAULT_CHAT_MAX_OUTPUT_TOKENS;
+}
+
 export async function POST(req: Request) {
   const log = createRequestLogger({ route: "/api/chat" });
   const totalTimer = startTimer();
@@ -126,6 +134,10 @@ export async function POST(req: Request) {
         system: systemPrompt,
         messages,
         temperature: 0.2,
+        // Bound the per-answer cost. Defaults to 2048 tokens; override per
+        // environment with CHAT_MAX_OUTPUT_TOKENS. Caps abusive prompt
+        // injections that try to make the model emit megabytes of output.
+        maxTokens: chatMaxOutputTokens(),
         async onFinish({ text, usage, finishReason }) {
           await supabase.from("messages").insert({
             chat_id: chatId,

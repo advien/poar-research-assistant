@@ -92,8 +92,38 @@ describe("UploadRequestSchema", () => {
     expect(r.ok).toBe(true);
   });
 
+  it("accepts the optional content_type when it matches application/pdf", () => {
+    const r = safeParse(UploadRequestSchema, {
+      filename: "paper.pdf",
+      size: 1_000_000,
+      content_type: "application/pdf",
+    });
+    expect(r.ok).toBe(true);
+  });
+
   it("rejects empty filename", () => {
     expect(safeParse(UploadRequestSchema, { filename: "", size: 1 }).ok).toBe(false);
+  });
+
+  it("rejects non-PDF extensions even when other fields are valid", () => {
+    expect(safeParse(UploadRequestSchema, { filename: "paper.docx", size: 100 }).ok).toBe(false);
+    expect(safeParse(UploadRequestSchema, { filename: "paper.exe", size: 100 }).ok).toBe(false);
+    expect(safeParse(UploadRequestSchema, { filename: "paper", size: 100 }).ok).toBe(false);
+  });
+
+  it("rejects path-traversal / control-character filenames", () => {
+    expect(safeParse(UploadRequestSchema, { filename: "../etc/passwd.pdf", size: 1 }).ok).toBe(false);
+    expect(safeParse(UploadRequestSchema, { filename: "evil\\paper.pdf", size: 1 }).ok).toBe(false);
+    expect(safeParse(UploadRequestSchema, { filename: "bad\u0000name.pdf", size: 1 }).ok).toBe(false);
+  });
+
+  it("rejects content_type values other than application/pdf", () => {
+    const r = safeParse(UploadRequestSchema, {
+      filename: "paper.pdf",
+      size: 1,
+      content_type: "image/png",
+    });
+    expect(r.ok).toBe(false);
   });
 
   it("rejects negative or zero file size", () => {
@@ -101,9 +131,22 @@ describe("UploadRequestSchema", () => {
     expect(safeParse(UploadRequestSchema, { filename: "p.pdf", size: -1 }).ok).toBe(false);
   });
 
-  it("rejects files larger than 100 MB", () => {
+  it("rejects files over the configured size cap", () => {
     expect(
       safeParse(UploadRequestSchema, { filename: "p.pdf", size: 101 * 1024 * 1024 }).ok
+    ).toBe(false);
+    expect(
+      safeParse(UploadRequestSchema, { filename: "p.pdf", size: 26 * 1024 * 1024 }).ok
+    ).toBe(false);
+  });
+
+  it("rejects unknown extra fields (strict)", () => {
+    expect(
+      safeParse(UploadRequestSchema, {
+        filename: "p.pdf",
+        size: 1,
+        sneaky: "payload",
+      }).ok
     ).toBe(false);
   });
 });
