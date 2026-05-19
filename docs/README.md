@@ -31,6 +31,10 @@ the project.
 
 ### Engineering
 - [Architecture decision records](engineering/decisions.md) - the trade-offs behind the stack, every "why X over Y" decision the project made.
+- [Testing](engineering/testing.md) - what each test layer covers, fakes-over-mocks conventions, integration-style RAG tests.
+- [Observability](engineering/observability.md) - structured JSON log shape, error classification, sample queries.
+- [Evaluation](engineering/evaluation.md) - RAG eval harness, dataset shape, metrics, exit codes.
+- [Ingestion pipeline](engineering/ingestion.md) - states, retry policy, progress reporting, queue migration path.
 
 ### Roadmap
 - [Future features](roadmap/future-features.md) - OCR fallback, Zotero, notes, collaborative research, AI recommendations, paper graph, terminology knowledge graph.

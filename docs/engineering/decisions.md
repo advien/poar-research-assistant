@@ -363,6 +363,190 @@ Numbered registry + `citations: number[]` per field. Resolved at write time
 
 ---
 
+## ADR-015: Vitest for the unit / integration test layer
+
+### Context
+Need a fast, ESM-native test runner that respects the `@/` path alias from
+`tsconfig.json` and runs cleanly in CI without a long compile step.
+
+### Options
+1. Jest with `ts-jest` + a custom moduleNameMapper.
+2. Jest with `babel-jest`.
+3. Vitest (Vite-based, native ESM, native TS).
+4. Node's built-in `node:test` plus `tsx`.
+
+### Decision
+Vitest, with one `vitest.config.ts` that mirrors the production module
+resolver. Test files live in `tests/lib/**`, mirroring `src/lib/**` 1:1.
+
+### Consequences
+- 100% reuse of the production module-resolution config.
+- Cold-start ~600 ms for the full suite, so `npm run check` is comfortable
+  to run pre-commit.
+- `vi.fn` / `vi.mock` / fake timers come for free; no extra dep.
+- Locked into a Vite-flavoured runner; if we ever migrate to Bun's runner
+  the API is similar enough that a port is mechanical.
+- Snapshot tests are deliberately not used for prompts (they're tweaked too
+  often); we assert invariants instead.
+
+---
+
+## ADR-016: GitHub Actions for CI without exposing real secrets
+
+### Context
+CI must enforce lint + typecheck + tests + build on every PR, but the app
+calls Anthropic, OpenAI, and Supabase. None of those credentials should be
+present in CI.
+
+### Options
+1. Run tests against a real Supabase project + real AI keys (slow, fragile,
+   leaks secrets into logs).
+2. Run tests offline against fakes/mocks; seed dummy env vars in the workflow.
+3. Use a recorded-fixture / VCR pattern.
+
+### Decision
+Offline tests with dummy env vars seeded in the workflow. The eval harness
+(`npm run eval:rag`) is the place where real AI calls happen and lives
+outside CI.
+
+### Consequences
+- Zero secret exposure in CI logs.
+- Fast feedback (~2 minutes for full pipeline).
+- Tests can never regress on "did the real Claude API change its response";
+  caught instead by the eval harness in pre-deploy.
+- One coverage job uploads LCOV artifacts for PR review.
+
+---
+
+## ADR-017: In-memory per-isolate rate limiting
+
+### Context
+AI endpoints are expensive (Claude streaming, structured generation,
+embedding batches). Need to cap abuse / runaway loops without adding an
+external dependency that requires a free-tier account and deploy-time
+wiring.
+
+### Options
+1. Upstash Redis via `@upstash/ratelimit` (de facto answer for Vercel).
+2. Cloudflare KV / Durable Objects (works on Workers, adds binding setup).
+3. Postgres-backed counter (correct, but adds a DB hop to every request).
+4. In-memory per-isolate fixed-window counter.
+
+### Decision
+In-memory per-isolate counter behind a narrow `RateLimiter` interface. The
+factory `getRateLimiter()` is the swap-in seam for Upstash / KV / a real
+distributed limiter.
+
+### Consequences
+- Zero external dependencies, zero deploy-time wiring.
+- Correctness is "best-effort per isolate": each isolate caps a single
+  attacker by orders of magnitude vs origin uncapped, and a real
+  distributed limiter is a one-line factory swap when traffic grows.
+- 429 responses include `Retry-After` + `X-RateLimit-*` headers and a JSON
+  body the UI parses into a calm "rate limit reached" banner.
+- All five AI-touching scopes (chat / upload / ingest / summary /
+  terminology / comparison) have their own bucket so a slow comparison
+  doesn't starve the chat budget.
+- Limits are env-configurable per scope.
+
+---
+
+## ADR-018: Structured JSON logger over a real APM SDK
+
+### Context
+Need request-grouped, per-stage observability for the AI pipeline (latency,
+token usage, retrieved chunk ids, error class) without adding a heavy SDK
+that may not run on Cloudflare Workers / Edge.
+
+### Options
+1. Datadog APM SDK / OpenTelemetry + a collector.
+2. Sentry for errors + a log shipper for everything else.
+3. Pino / winston with custom transports.
+4. Hand-written zero-dep JSON logger that writes one line per `console.*`.
+
+### Decision
+Hand-written JSON logger (`src/lib/observability/logger.ts`) with a stable
+output shape (ISO timestamp, level, dotted event name, request_id,
+user_id, route, ...arbitrary fields). The platform's log forwarder
+(Cloudflare Logpush, Vercel Logs, Datadog Agent on Node) ingests the lines.
+
+### Consequences
+- Runs everywhere our routes run (Edge / Workers / Node).
+- Zero deps, zero cold-start cost.
+- `classifyError()` maps any thrown value to a small, stable
+  `error_type` so dashboards filter by failure mode without pattern-matching
+  free text.
+- No retries on log delivery — acceptable for observability data.
+- No sampling — fine at portfolio scale; would need a `sampleRate` arg
+  before million-RPM.
+- Sentry-style stack-trace grouping is left to the log pipeline rather than
+  the app.
+
+---
+
+## ADR-019: Refusal-grounded RAG (the "no context" placeholder)
+
+### Context
+A RAG system that hallucinates with confidence is worse than one that
+admits ignorance. The model needs an explicit, prompt-visible signal that
+retrieval was empty so it can refuse cleanly.
+
+### Options
+1. Skip the LLM call entirely when retrieval is empty. (Loses the chance
+   for the model to e.g. ask a clarifying question.)
+2. Return an empty string for the context block and hope the model figures
+   it out.
+3. Return a documented placeholder string the prompt explicitly handles
+   (`(no relevant chunks were retrieved from the user's library)`).
+4. Let the model decide via a `tool_choice` round-trip.
+
+### Decision
+A documented `EMPTY_RETRIEVAL_FALLBACK` placeholder, paired with a system
+prompt rule that tells the model to "say so plainly and suggest what the
+user could upload" when the context is empty.
+
+### Consequences
+- The pipeline is one code path; UI / persistence / streaming all behave
+  identically with or without retrieved chunks.
+- The eval harness has dedicated refusal probes that assert
+  `refusal_correct_rate >= 0.8`.
+- The model does occasionally over-refuse on borderline relevance — tuned
+  acceptable because the alternative is fabrication.
+- Empty top-k still consumes a model call; cheap because the message is
+  short.
+
+---
+
+## ADR-020: Inline ingestion + retry policy, queue-ready API
+
+### Context
+ADR-008 chose inline ingestion. Production scale needs retries on transient
+errors and progress visibility, but does not (yet) justify a real queue.
+
+### Options
+1. Keep inline ingestion as-is.
+2. Migrate to Cloudflare Queues / Inngest / Trigger.dev today.
+3. Keep inline ingestion but factor out an `enqueueIngest()` indirection
+   plus retry policy + per-stage progress.
+
+### Decision
+Option 3. The `papers.status` enum gains `summarizing` and `retrying`. A
+DB trigger stamps `ingest_started_at` / `ingest_finished_at` / increments
+`ingest_attempts` so the UI sees progress without polling the worker.
+`enqueueIngest()` is the single seam a future queue migration changes.
+
+### Consequences
+- 90% of the operational benefit of a queue (visible progress, transient
+  retry, no lost rows on failure) for 0% of the infrastructure tax.
+- Cloudflare Workers Free CPU cap is still a real risk for very long
+  papers; documented in the deployment doc.
+- Migration to Cloudflare Queues / Inngest is mechanical: replace the body
+  of `enqueueIngest()` with a `queue.send({ paperId })` call and host the
+  consumer that wraps `ingestPaper()` with `maxAttempts: 3`.
+- `isTransient(errorType)` keeps the retry policy small and explicit.
+
+---
+
 ## Performance considerations
 
 - **Embedding batches** are capped at 96 inputs per call to stay under

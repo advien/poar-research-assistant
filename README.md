@@ -2,6 +2,7 @@
 
 > AI research assistant for prosthetics, orthotics, biomechanics, and rehabilitation robotics papers.
 
+[![CI](https://github.com/advien/poar-research-assistant/actions/workflows/ci.yml/badge.svg)](https://github.com/advien/poar-research-assistant/actions/workflows/ci.yml)
 [![Next.js](https://img.shields.io/badge/Next.js-15-000000?logo=nextdotjs&logoColor=white)](https://nextjs.org)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org)
 [![Supabase](https://img.shields.io/badge/Supabase-Postgres%20%2B%20pgvector-3ECF8E?logo=supabase&logoColor=white)](https://supabase.com)
@@ -228,6 +229,173 @@ wrangler.toml, open-next.config.ts Cloudflare config
 | Compare Papers side-by-side | _placeholder_ |
 | Conversation sidebar | _placeholder_ |
 
+> A walkthrough demo GIF / video of the chat + citations + paper view will
+> be linked here once recorded. The ingestion → ready timeline is best seen
+> in motion.
+
+---
+
+## Reliability Design
+
+POAR is opinionated about being a reliable AI workflow rather than a fancy
+chatbot. Concretely:
+
+- **Grounded generation only.** The chat system prompt forbids fabrication
+  and requires every claim to cite a numbered context chunk. When retrieval
+  returns zero rows the prompt receives a documented `(no relevant chunks
+  were retrieved from the user's library)` placeholder so the model can
+  refuse cleanly instead of hallucinating.
+  See [`src/lib/rag/retrieve.ts`](src/lib/rag/retrieve.ts) and
+  [`src/lib/ai/prompts.ts`](src/lib/ai/prompts.ts).
+- **1-indexed Citation registry.** Every cited claim resolves to a real
+  `Citation { chunk_id, paper_id, page_start, page_end, snippet }` *on the
+  server*; hallucinated citation numbers are silently dropped (see
+  [`resolveCitationRefs`](src/lib/analyses/paperContext.ts)). Links keep
+  working forever because the registry is stored alongside the payload, not
+  derived at render time.
+- **Structured outputs are schema-enforced.** Summary, terminology, and
+  comparison generators use the AI SDK's `generateObject` with a Zod schema
+  ([`src/lib/analyses/schemas.ts`](src/lib/analyses/schemas.ts)). The model
+  cannot emit an unparseable response; if it tries, we capture the failure
+  with `NoObjectGeneratedError` and surface a typed error.
+- **Per-stage status with retries.** Ingestion is split into discrete stages
+  (`pending → parsing → embedding → summarizing → ready` with `retrying` and
+  `failed` siblings). Transient errors (timeouts, rate-limits, internal)
+  are retried with exponential backoff; non-transient failures (scanned
+  PDFs, validation errors) surface immediately. See
+  [`docs/engineering/ingestion.md`](docs/engineering/ingestion.md).
+- **Rate-limited AI endpoints.** All five AI-touching routes (chat, ingest,
+  upload, summary, terminology, comparison) are rate-limited per user / IP
+  with configurable per-scope buckets. Exceeding the limit returns a 429
+  with `Retry-After`; the chat UI renders a calm "rate limit reached" banner
+  instead of blowing up the conversation.
+- **RLS at every layer.** Embeddings, papers, chats, summaries, terminology,
+  and comparisons all live behind row-level security. The retrieval RPC
+  filters by `auth.uid()` in the same query as the ANN, so a forgotten
+  `WHERE` clause cannot leak data.
+
+The full design rationale lives in
+[`docs/engineering/decisions.md`](docs/engineering/decisions.md).
+
+---
+
+## Observability
+
+Every AI call emits a structured JSON log line via
+[`src/lib/observability/logger.ts`](src/lib/observability/logger.ts):
+
+```json
+{
+  "ts": "2026-05-19T12:00:00.000Z",
+  "level": "info",
+  "msg": "rag.retrieve.done",
+  "request_id": "0e7c1b1a-...",
+  "user_id": "8a82b7e3-...",
+  "route": "/api/chat",
+  "chat_id": "...",
+  "retrieved_chunks": 8,
+  "retrieved_chunk_ids": ["...", "..."],
+  "empty": false,
+  "latency_ms": 842
+}
+```
+
+Routes share a request-scoped logger (`createRequestLogger({ route, userId })`)
+that auto-stamps `request_id`. Per-stage events follow a stable
+`<feature>.<stage>.<verb>` naming convention (`rag.retrieve.start`,
+`chat.generation.done`, `ingest.embed.done`). Errors are bucketed via
+`classifyError()` into a small, stable set of `error_type` values
+(`auth | rate_limit | timeout | ingest_no_text | embedding | model |
+validation | internal | unknown`) so dashboards filter by failure mode
+without pattern-matching free text.
+
+Cloudflare Logpush / Vercel Logs / Datadog all index these out of the box.
+Sample queries (slowest chats, empty-retrieval rate, token usage by model
+per day) are listed in [`docs/engineering/observability.md`](docs/engineering/observability.md).
+
+---
+
+## Evaluation
+
+A measurable RAG-quality harness lives under [`evals/`](evals):
+
+- **`evals/rag-eval.json`** — eight POAR-domain probes (dataset, amputation
+  level, device, outcomes, limitations, control strategy, plus two
+  out-of-corpus refusal probes).
+- **`evals/run.ts`** — Node CLI that POSTs each question through `/api/chat`,
+  reads the streamed response, and reports retrieval hit rate, citation
+  coverage, answer-match rate, refusal correctness, and p50/p95/max latency.
+
+```bash
+POAR_API_URL=http://localhost:3000 \
+POAR_AUTH_COOKIE='sb-access-token=...; sb-refresh-token=...' \
+npm run eval:rag
+```
+
+The runner returns a non-zero exit code when retrieval hit rate drops below
+70% or refusal accuracy drops below 80%, making it suitable to gate deploys
+on. Full design + adding-new-probes guide:
+[`docs/engineering/evaluation.md`](docs/engineering/evaluation.md).
+
+---
+
+## Error Handling
+
+| Layer | Strategy |
+| --- | --- |
+| **Request validation** | Centralised Zod schemas in [`src/lib/api/schemas.ts`](src/lib/api/schemas.ts) plus a `safeParse` helper that returns a discriminated union. Malformed JSON, missing fields, oversize content, non-UUID ids, and unknown roles all reject with a `400 bad_request`. |
+| **Auth** | Every route checks `supabase.auth.getUser()` first and returns `401 unauthorized` if no session. RLS provides defence-in-depth. |
+| **Rate limiting** | `enforceRateLimit({ req, scope, userId })` returns `null` when allowed and a ready 429 `Response` (with `Retry-After` + `X-RateLimit-*` headers) when blocked. The chat UI parses the 429 body and renders a friendly banner. |
+| **Retrieval failure** | `retrieveContext` throws on RPC errors with a clear "retrieval failed: <pgcode>" message; the route logs `rag.retrieve.failed` and returns 500. Empty top-k is **not** an error: it falls back to a documented placeholder so the model can refuse cleanly. |
+| **Generation failure** | Streaming routes use `createDataStreamResponse({ onError })`. The error is classified, logged, and surfaced to the client as a plain string the UI shows in a destructive banner. Non-streaming routes return `500 generation_failed` with a classified `detail`. |
+| **Ingestion failure** | Per-stage status writes mean we always know which stage failed. Transient failures retry with exponential backoff up to `maxAttempts`; non-transient failures stop immediately and write `papers.status = 'failed'` with the classified message. |
+| **Structured-output schema rejection** | The AI SDK throws `NoObjectGeneratedError`. We capture and log `cause`, `finishReason`, `usage`, and a 800-char text snippet so the next prompt-tuning iteration starts with real evidence. |
+
+---
+
+## Failure Modes & Mitigations
+
+| Failure | Detection | Mitigation |
+| --- | --- | --- |
+| Scanned PDF (no extractable text) | `pages.every(p => !p.text.trim())` | Hard-fail to `papers.status = 'failed'`. No retry. Documented OCR fallback in roadmap. |
+| Anthropic / OpenAI rate limit | Upstream 429 | Classified as `rate_limit`; ingestion retries with backoff. Chat surfaces a 429 banner to the user. |
+| Anthropic 5xx / timeout | Upstream HTTP / SDK error | Classified as `timeout` or `model`; transient classes retry. |
+| Cloudflare Workers Free CPU cap (30 s) | Workers kills the isolate | Documented in [`docs/deployment/cloudflare-pages.md`](docs/deployment/cloudflare-pages.md). Mitigation: deploy on Workers Paid (5 min cap) or migrate to a queue (one-line swap of `enqueueIngest`). |
+| Empty retrieval / wrong paper | `retrieved_chunks === 0` | Prompt receives the `EMPTY_RETRIEVAL_FALLBACK` placeholder; the model is steered to refuse cleanly. The eval harness asserts refusal correctness >= 80%. |
+| Hallucinated citation numbers | `resolveCitationRefs` validates against the registry | Out-of-range numbers are silently dropped. The UI never renders a broken link. |
+| Worker isolate killed mid-ingest | (passive) `papers.status` stays in `parsing` / `embedding` / `summarizing` | The 0006 migration adds a partial index on non-terminal statuses so a future watchdog can reset stale rows. |
+| Concurrent ingestion of the same paper | Unique `(paper_id, chunk_index)` constraint on `chunks` | Second insert fails; pipeline catches the insert error and moves to `failed`. |
+| Token budget exceeded for structured generation | `NoObjectGeneratedError` with `finishReason: 'length'` | We capture and log; user can regenerate (the route allocates 8k–16k output tokens depending on schema size). |
+| Streaming response disconnected mid-flight | Browser `aborted` | The `useChat` hook drops the partial assistant turn; the persisted user turn remains. Re-sending replays cleanly. |
+
+---
+
+## CI/CD
+
+[![CI](https://github.com/advien/poar-research-assistant/actions/workflows/ci.yml/badge.svg)](https://github.com/advien/poar-research-assistant/actions/workflows/ci.yml)
+
+GitHub Actions runs on every push to `main` and every pull request:
+
+- `npm ci` — clean install pinned to the lockfile.
+- `npm run lint` — ESLint via `next lint`.
+- `npm run typecheck` — `tsc --noEmit`.
+- `npm run test` — Vitest, ~100 tests covering chunking, retrieval,
+  prompt construction, citation resolution, API validation, rate-limiting,
+  observability, and eval metrics.
+- `npm run build` — full Next.js production build.
+- A separate `coverage` job uploads the v8 LCOV report as an artifact for
+  review.
+
+Tests run **offline**: every test injects a fake Supabase / fake embedder /
+fake AI SDK call. Real Anthropic, OpenAI, and Supabase credentials are
+never exposed to GitHub Actions.
+
+```bash
+npm run check  # lint + typecheck + tests, the same gate the CI runs
+```
+
+The full pipeline lives in [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
+
 ---
 
 ## Local Development
@@ -255,7 +423,11 @@ npm run build        # production build
 npm run start        # serve the production build
 npm run lint         # next lint
 npm run typecheck    # tsc --noEmit
-npm run check        # lint + typecheck
+npm run test         # Vitest, run once
+npm run test:watch   # Vitest, interactive watcher
+npm run test:coverage # Vitest + v8 coverage (text + html + lcov)
+npm run check        # lint + typecheck + tests, the same gate the CI runs
+npm run eval:rag     # POST eval probes through /api/chat, report metrics
 
 npm run db:push      # apply local migrations to the linked Supabase project
 npm run db:reset     # wipe + replay (local only)
@@ -311,6 +483,7 @@ order.
 | `0003_realtime.sql` | adds `papers` to the realtime publication |
 | `0004_chat_history.sql` | conversation pin / archive / `last_message_at` / `message_count` + `search_chats` RPC |
 | `0005_analyses.sql` | `paper_summaries`, `paper_terminology`, `paper_comparisons` + unified `search_analyses` RPC |
+| `0006_ingestion_jobs.sql` | extends `papers.status` with `summarizing` / `retrying`, adds `ingest_attempts` / `ingest_progress_pct` / `ingest_started_at` / `ingest_finished_at`, plus the trigger that maintains them |
 
 All migrations are idempotent.
 
@@ -398,9 +571,9 @@ In-depth engineering and product documentation lives in [`docs/`](docs/README.md
 - [Architecture overview](docs/architecture/system-overview.md)
 - [Database schema reference](docs/database/schema.md)
 - [RAG pipeline + tradeoffs](docs/rag-pipeline/retrieval-flow.md)
+- Engineering: [Testing](docs/engineering/testing.md), [Observability](docs/engineering/observability.md), [Evaluation](docs/engineering/evaluation.md), [Ingestion pipeline](docs/engineering/ingestion.md), [Architecture decisions](docs/engineering/decisions.md)
 - Feature docs: [Library](docs/features/library.md), [Chat](docs/features/chat.md), [Structured Summaries](docs/features/structured-summaries.md), [Terminology](docs/features/terminology.md), [Compare Papers](docs/features/compare-papers.md), [Research History](docs/features/research-history.md)
 - [Cloudflare Pages deployment](docs/deployment/cloudflare-pages.md)
-- [Architecture decision records](docs/engineering/decisions.md)
 - [Future features](docs/roadmap/future-features.md)
 - [Portfolio project summary](docs/portfolio/project-summary.md)
 
