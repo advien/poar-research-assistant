@@ -3,6 +3,7 @@ import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import type { AnalysisHistoryItem, AnalysisKind } from "@/types/db";
 
+export const runtime = "edge";
 export const dynamic = "force-dynamic";
 
 const Query = z.object({

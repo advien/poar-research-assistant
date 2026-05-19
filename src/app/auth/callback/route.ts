@@ -1,6 +1,8 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 
+export const runtime = "edge";
+
 /**
  * Magic-link callback. Three outcomes:
  *

@@ -5,6 +5,12 @@ import { createClient } from "@/lib/supabase/server";
 import { Button } from "@/components/ui/button";
 import { Library, MessageSquare, Settings, BookOpen, GitCompare, History } from "lucide-react";
 
+// Cloudflare Pages (next-on-pages) requires every non-static App Router route
+// to opt in to the Edge runtime. The root layout is dynamic (it reads cookies
+// via the Supabase server client), so this declaration cascades to every
+// nested page that does not override it.
+export const runtime = "edge";
+
 const APP_NAME = "POAR Research Assistant";
 const APP_DESCRIPTION =
   "AI-powered biomedical research workspace for prosthetics, orthotics, assistive robotics, biomechanics, and rehabilitation engineering literature.";

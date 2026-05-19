@@ -5,6 +5,7 @@ import { PaperWorkspace } from "./_components/PaperWorkspace";
 import type { Citation, ChatListItem } from "@/types/db";
 import type { InitialChatMessage as IM } from "./_components/ChatPanel";
 
+export const runtime = "edge";
 export const dynamic = "force-dynamic";
 
 type SearchParams = { chat?: string; new?: string };

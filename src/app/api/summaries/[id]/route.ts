@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 
+export const runtime = "edge";
+
 type Params = { params: Promise<{ id: string }> };
 const Patch = z.object({
   pinned: z.boolean().optional(),

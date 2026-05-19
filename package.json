@@ -39,7 +39,11 @@
     "start": "next start",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
-    "check": "npm run lint && npm run typecheck",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "eval:rag": "tsx evals/run.ts",
+    "check": "npm run lint && npm run typecheck && npm run test",
     "db:reset": "supabase db reset",
     "db:push": "supabase db push",
     "db:types": "supabase gen types typescript --local > src/types/db.ts",
@@ -70,9 +74,12 @@
     "@types/node": "^22.10.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
+    "@vitest/coverage-v8": "^4.1.6",
     "eslint": "^9.16.0",
     "eslint-config-next": "^15.1.0",
     "tailwindcss": "^4.0.0",
-    "typescript": "^5.7.0"
+    "tsx": "^4.22.3",
+    "typescript": "^5.7.0",
+    "vitest": "^4.1.6"
   }
 }

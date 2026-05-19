@@ -1,5 +1,10 @@
 "use client";
 
+// Route segment config still applies to a "use client" page - Next.js parses
+// these exports server-side before turning the rest of the module into a
+// client bundle. Required so next-on-pages recognises /login as Edge-runtime.
+export const runtime = "edge";
+
 import { Suspense, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";

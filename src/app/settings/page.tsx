@@ -6,6 +6,7 @@ import { CATEGORY_LABELS, CATEGORY_ORDER, TAGS_BY_CATEGORY, labelFor } from "@/l
 import { CHAT_MODEL } from "@/lib/ai/anthropic";
 import { EMBEDDING_DIM, EMBEDDING_MODEL } from "@/lib/ai/openai";
 
+export const runtime = "edge";
 export const dynamic = "force-dynamic";
 
 export default async function SettingsPage() {

@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { HistoryClient } from "./_components/HistoryClient";
 
+export const runtime = "edge";
 export const dynamic = "force-dynamic";
 
 export default async function HistoryPage({

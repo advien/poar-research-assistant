@@ -1,13 +1,9 @@
 import { NextResponse } from "next/server";
-import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { embedQuery } from "@/lib/ai/openai";
+import { SearchRequestSchema, safeParse } from "@/lib/api/schemas";
 
-const Body = z.object({
-  q: z.string().min(1).max(500),
-  paper_id: z.string().uuid().nullable().optional(),
-  limit: z.number().int().min(1).max(30).optional(),
-});
+export const runtime = "edge";
 
 export async function POST(req: Request) {
   const supabase = await createClient();
@@ -16,12 +12,17 @@ export async function POST(req: Request) {
   } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
-  let body: z.infer<typeof Body>;
+  let payload: unknown;
   try {
-    body = Body.parse(await req.json());
-  } catch (e) {
-    return NextResponse.json({ error: "bad_request", detail: String(e) }, { status: 400 });
+    payload = await req.json();
+  } catch {
+    return NextResponse.json({ error: "bad_request", detail: "malformed JSON" }, { status: 400 });
   }
+  const parsed = safeParse(SearchRequestSchema, payload);
+  if (!parsed.ok) {
+    return NextResponse.json({ error: "bad_request", detail: parsed.error }, { status: 400 });
+  }
+  const body = parsed.data;
 
   const queryEmbedding = await embedQuery(body.q);
 

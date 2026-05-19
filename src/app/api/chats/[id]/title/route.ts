@@ -4,7 +4,8 @@ import { fallbackTitle, generateChatTitle } from "@/lib/ai/title";
 
 type Params = { params: Promise<{ id: string }> };
 
-export const runtime = "nodejs";
+// Edge runtime: Anthropic via @ai-sdk/anthropic uses fetch and runs on Workers.
+export const runtime = "edge";
 export const maxDuration = 30;
 
 /**

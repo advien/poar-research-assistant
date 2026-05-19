@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import type { ChatListItem, ChatListPage } from "@/types/db";
 import { decodeCursor, encodeCursor } from "@/lib/chats/cursor";
 
+export const runtime = "edge";
 export const dynamic = "force-dynamic";
 
 const Query = z.object({
