@@ -197,7 +197,7 @@ export function ChatPanel({
           </div>
         )}
 
-        {error ? <p className="text-sm text-destructive">{error.message}</p> : null}
+        {error ? <ChatErrorBanner message={error.message} /> : null}
       </div>
 
       <form
@@ -278,6 +278,46 @@ function MessageBubble({
       )}
     </div>
   );
+}
+
+/**
+ * Render a chat error in a user-friendly way. Detects the JSON shape returned
+ * by `enforceRateLimit` (429 with `{ error: "rate_limited", ... }`) and shows
+ * a calm "slow down" message. Falls back to the raw message for other errors.
+ */
+function ChatErrorBanner({ message }: { message: string }) {
+  const parsed = (() => {
+    try {
+      const obj = JSON.parse(message);
+      if (obj && typeof obj === "object" && obj.error === "rate_limited") {
+        return obj as {
+          error: "rate_limited";
+          scope?: string;
+          detail?: string;
+          retry_after_sec?: number;
+        };
+      }
+    } catch {
+      /* not JSON */
+    }
+    return null;
+  })();
+
+  if (parsed) {
+    return (
+      <div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm">
+        <p className="font-medium text-amber-700 dark:text-amber-300">
+          Rate limit reached
+        </p>
+        <p className="mt-1 text-xs text-amber-700/90 dark:text-amber-200/80">
+          {parsed.detail ??
+            `Please wait ${parsed.retry_after_sec ?? 60}s before trying again.`}
+        </p>
+      </div>
+    );
+  }
+
+  return <p className="text-sm text-destructive">{message}</p>;
 }
 
 /** Replace [n] markers in the assistant text with clickable badges. */
