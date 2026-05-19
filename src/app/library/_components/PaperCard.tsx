@@ -94,27 +94,50 @@ export function PaperCard({
   );
 }
 
+/**
+ * User-facing copy for each ingestion stage. Keeps the raw enum values in
+ * the DB (and in logs) but maps them to descriptive verbs the user can
+ * actually parse without knowing the pipeline internals.
+ */
+const STATUS_COPY: Record<ListItem["status"], string> = {
+  pending: "Queued",
+  parsing: "Parsing PDF...",
+  embedding: "Generating embeddings...",
+  summarizing: "Writing summary...",
+  retrying: "Retrying...",
+  ready: "Ready",
+  failed: "Failed",
+};
+
 function StatusBadge({ status }: { status: ListItem["status"] }) {
+  const label = STATUS_COPY[status] ?? status;
   switch (status) {
     case "ready":
       return (
         <Badge variant="success" className="gap-1">
-          <CheckCircle2 className="h-3 w-3" /> ready
+          <CheckCircle2 className="h-3 w-3" /> {label}
         </Badge>
       );
     case "failed":
       return (
         <Badge variant="destructive" className="gap-1">
-          <AlertTriangle className="h-3 w-3" /> failed
+          <AlertTriangle className="h-3 w-3" /> {label}
+        </Badge>
+      );
+    case "retrying":
+      return (
+        <Badge variant="warning" className="gap-1">
+          <AlertTriangle className="h-3 w-3" /> {label}
         </Badge>
       );
     case "pending":
     case "parsing":
     case "embedding":
+    case "summarizing":
     default:
       return (
         <Badge variant="warning" className="gap-1">
-          <Loader2 className="h-3 w-3 animate-spin" /> {status}
+          <Loader2 className="h-3 w-3 animate-spin" /> {label}
         </Badge>
       );
   }

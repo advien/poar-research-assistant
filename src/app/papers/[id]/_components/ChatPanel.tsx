@@ -6,7 +6,16 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import type { Citation, PaperStatus } from "@/types/db";
-import { ChevronDown, ChevronUp, Loader2, Send, Sparkles } from "lucide-react";
+import {
+  AlertCircle,
+  CheckCircle2,
+  ChevronDown,
+  ChevronUp,
+  Loader2,
+  Send,
+  Square,
+  Sparkles,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export type InitialChatMessage = Omit<Message, "createdAt"> & {
@@ -27,6 +36,18 @@ type Props = {
   emptyHelp?: string;
   /** Optional banner above the messages (e.g. conversation title). */
   topBanner?: React.ReactNode;
+};
+
+/** Mirrors STATUS_COPY in the library card so the in-paper view shows the
+ *  same human-friendly labels for the ingestion stages. */
+const INGEST_STATUS_LABEL: Record<NonNullable<PaperStatus>, string> = {
+  pending: "queued",
+  parsing: "parsing PDF",
+  embedding: "generating embeddings",
+  summarizing: "writing summary",
+  retrying: "retrying",
+  ready: "ready",
+  failed: "failed",
 };
 
 type CitationsAnnotation = {
@@ -85,6 +106,7 @@ export function ChatPanel({
     isLoading,
     data,
     error,
+    stop,
   } = useChat({
     id: hookId,
     api: "/api/chat",
@@ -161,7 +183,9 @@ export function ChatPanel({
       <div ref={scrollerRef} className="flex-1 overflow-auto p-4 space-y-4">
         {!ready && (
           <div className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
-            Paper is still being processed ({status}). Chat will be available once ingestion completes.
+            {status === "failed"
+              ? "Ingestion failed for this paper."
+              : `Paper is still being processed (${INGEST_STATUS_LABEL[status ?? "pending"] ?? status}). Chat will be available once ingestion completes.`}
             {errorMessage ? (
               <div className="mt-2 text-destructive text-xs">{errorMessage}</div>
             ) : null}
@@ -180,12 +204,17 @@ export function ChatPanel({
             .slice(0, idx + 1)
             .filter((x) => x.role === "assistant").length - 1;
           const cites = m.role === "assistant" ? citationsForAssistantIndex(assistantIdx) : [];
+          // Mark the assistant turn as "streaming" so we don't show a
+          // grounding badge before the answer has finished landing.
+          const isStreaming =
+            m.role === "assistant" && isLoading && idx === messages.length - 1;
           return (
             <MessageBubble
               key={m.id}
               role={m.role as "user" | "assistant"}
               content={m.content}
               citations={cites}
+              streaming={isStreaming}
               onCitationClick={onCitationClick}
             />
           );
@@ -224,9 +253,22 @@ export function ChatPanel({
             }
           }}
         />
-        <Button type="submit" size="icon" disabled={!ready || isLoading || !input.trim()}>
-          <Send className="h-4 w-4" />
-        </Button>
+        {isLoading ? (
+          <Button
+            type="button"
+            size="icon"
+            variant="destructive"
+            onClick={() => stop()}
+            aria-label="Stop generation"
+            title="Stop generation"
+          >
+            <Square className="h-4 w-4" />
+          </Button>
+        ) : (
+          <Button type="submit" size="icon" disabled={!ready || !input.trim()}>
+            <Send className="h-4 w-4" />
+          </Button>
+        )}
       </form>
     </div>
   );
@@ -236,11 +278,14 @@ function MessageBubble({
   role,
   content,
   citations,
+  streaming,
   onCitationClick,
 }: {
   role: "user" | "assistant";
   content: string;
   citations: Citation[];
+  /** True while the AI SDK is still appending tokens to this assistant turn. */
+  streaming?: boolean;
   onCitationClick?: (citation: Citation) => void;
 }) {
   return (
@@ -257,6 +302,9 @@ function MessageBubble({
           ? renderWithCitations(content, citations, onCitationClick)
           : content}
       </div>
+      {role === "assistant" && !streaming && (
+        <GroundingBadge content={content} citations={citations} />
+      )}
       {role === "assistant" && citations.length > 0 && (
         <details className="text-xs text-muted-foreground">
           <summary className="cursor-pointer select-none">{citations.length} sources</summary>
@@ -277,6 +325,47 @@ function MessageBubble({
         </details>
       )}
     </div>
+  );
+}
+
+/**
+ * Surfaces the answer's grounding state at a glance:
+ *  - Green "Grounded in N sources" when the answer cites at least one chunk.
+ *  - Amber "No supporting context found" when retrieval was empty so the
+ *    user knows the model is operating without grounding (and the system
+ *    prompt has steered it toward refusal).
+ *  - Amber "Cited but not referenced" when retrieval returned chunks but
+ *    the model didn't actually use any [n] markers in the answer text.
+ */
+function GroundingBadge({
+  content,
+  citations,
+}: {
+  content: string;
+  citations: Citation[];
+}) {
+  // Cheap inline-marker count, avoids a re-parse over the full token stream.
+  const markerCount = (content.match(/\[\d+\]/g) ?? []).length;
+
+  if (citations.length === 0) {
+    return (
+      <Badge variant="warning" className="gap-1 text-[10px] font-normal">
+        <AlertCircle className="h-3 w-3" /> No supporting context found
+      </Badge>
+    );
+  }
+  if (markerCount === 0) {
+    return (
+      <Badge variant="warning" className="gap-1 text-[10px] font-normal">
+        <AlertCircle className="h-3 w-3" /> Sources retrieved but not referenced
+      </Badge>
+    );
+  }
+  return (
+    <Badge variant="success" className="gap-1 text-[10px] font-normal">
+      <CheckCircle2 className="h-3 w-3" /> Grounded in {citations.length}{" "}
+      {citations.length === 1 ? "source" : "sources"}
+    </Badge>
   );
 }
 

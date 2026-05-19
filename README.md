@@ -353,6 +353,76 @@ on. Full design + adding-new-probes guide:
 
 ---
 
+## Loading States
+
+Each long-running step in the app surfaces a typed loading state in the UI
+so the user always knows where they are in the workflow.
+
+| Step | UI surface | Copy |
+| --- | --- | --- |
+| Upload (browser → Storage) | dropzone row | "uploading" with spinner |
+| Ingestion: queued | library card status badge | `Queued` (amber) |
+| Ingestion: parsing PDF | library card status badge | `Parsing PDF…` (amber) |
+| Ingestion: embedding chunks | library card status badge | `Generating embeddings…` (amber) |
+| Ingestion: writing summary | library card status badge | `Writing summary…` (amber) |
+| Ingestion: retrying transient failure | library card status badge | `Retrying…` (amber) |
+| Ingestion: ready | library card status badge | `Ready` (green) |
+| Ingestion: failed | library card status badge | `Failed` (red) + error text |
+| Retrieval (RAG) | chat panel composer | `thinking…` spinner |
+| Generation (LLM streaming) | chat panel composer | `thinking…` spinner; the Send button swaps to a red Stop button while streaming so the user can cancel |
+| Grounding outcome | per-assistant message | green `Grounded in N sources` / amber `No supporting context found` / amber `Sources retrieved but not referenced` |
+| Rate limit reached | chat panel | amber banner with `Retry-After` countdown |
+| Generation error | chat panel | destructive banner with the classified error message |
+
+Status copy lives in `STATUS_COPY` (library) and `INGEST_STATUS_LABEL`
+(paper page). The DB stores the raw enum (`pending` / `parsing` /
+`embedding` / `summarizing` / `retrying` / `ready` / `failed`); the UI maps
+to user-facing copy at the boundary.
+
+---
+
+## Known Limitations
+
+What this codebase deliberately does NOT do today:
+
+- **OCR for scanned PDFs.** Documents with no extractable text are rejected
+  during ingestion with a clear "no extractable text" error. A Claude Vision
+  fallback is on the roadmap.
+- **Inline ingestion vs a real queue.** `enqueueIngest()` runs the pipeline
+  in-process with bounded retries. Cloudflare Workers Free's 30-second CPU
+  cap can truncate very long papers; production needs Workers Paid (5 min
+  cap) or a swap-in to Cloudflare Queues / Inngest. The state machine and
+  retry policy are queue-ready, only the transport changes.
+- **Distributed rate limiting.** The per-isolate in-memory limiter is a
+  best-effort soft barrier per Worker, not a globally consistent limit. At
+  meaningful traffic the `RateLimiter` interface needs a Redis / KV /
+  Durable Objects backend.
+- **No reranker.** Retrieval relies on pure HNSW cosine for chat (top-k is
+  hardcoded at 8 / 12) and RRF hybrid for the dedicated search endpoint.
+  Adding a cross-encoder reranker is the natural next quality step.
+- **No multi-paper synthesis.** Cross-library chat issues a single ANN
+  query; there is no map-reduce stage that summarises across papers before
+  answering.
+- **Realtime is per-user, not per-team.** RLS factoring is multi-tenant
+  ready, but `supabase_realtime` channels are scoped per user.
+- **No PR preview deploys configured in this repo.** Cloudflare Pages can
+  do them when enabled at the project level; the GitHub Actions CI runs
+  on PRs but does not produce a preview URL.
+- **No cost / usage caps per user.** Token usage is logged but not
+  rate-shaped beyond the per-minute request caps; per-day spend caps are
+  out of scope for the MVP.
+- **No automated UI tests.** The 100+ unit tests cover lib code and pure
+  helpers; React component rendering and end-to-end browser flows are
+  exercised manually.
+- **PDFs are bounded at 25 MB / 200 pages by default.** Both are env-tunable
+  (`UPLOAD_MAX_BYTES`, `INGEST_MAX_PAGES`).
+- **Citations link to a PDF page, not a paragraph anchor.** Highlighting
+  the cited paragraph inside the PDF viewer is on the roadmap.
+- **The eval harness needs real credentials.** `npm run eval:rag` hits a
+  live deployment; it does not run inside GitHub Actions CI.
+
+---
+
 ## Failure Modes & Mitigations
 
 | Failure | Detection | Mitigation |
