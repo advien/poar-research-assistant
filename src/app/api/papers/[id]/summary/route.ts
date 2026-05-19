@@ -1,9 +1,14 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { generateStructuredSummary } from "@/lib/analyses/generateSummary";
+import { enforceRateLimit } from "@/lib/rate-limit/edge";
+import { classifyError, createRequestLogger, startTimer } from "@/lib/observability/logger";
 import type { SummaryRow } from "@/types/db";
 
-export const runtime = "nodejs";
+// Edge runtime: structured summary generation uses the AI SDK + Supabase, both
+// of which run on Workers. The CPU envelope can be tight on Free; use Paid for
+// production-sized papers.
+export const runtime = "edge";
 export const maxDuration = 120;
 
 type Params = { params: Promise<{ id: string }> };
@@ -45,15 +50,22 @@ export async function GET(_req: Request, { params }: Params) {
 }
 
 /** POST - generate (or regenerate) the summary, creating a new version row. */
-export async function POST(_req: Request, { params }: Params) {
+export async function POST(req: Request, { params }: Params) {
   const { id: paperId } = await params;
+  const log = createRequestLogger({ route: "/api/papers/:id/summary", extra: { paper_id: paperId } });
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const userLog = log.child({ user_id: user.id });
 
-  // Verify ownership via RLS-aware client.
+  const rl = await enforceRateLimit({ req, scope: "summary", userId: user.id });
+  if (rl.limited) {
+    userLog.warn("ratelimit.blocked", { scope: "summary" });
+    return rl.limited;
+  }
+
   const { data: paper } = await supabase
     .from("papers")
     .select("id,title")
@@ -61,8 +73,14 @@ export async function POST(_req: Request, { params }: Params) {
     .single();
   if (!paper) return NextResponse.json({ error: "not_found" }, { status: 404 });
 
+  const t = startTimer();
   try {
     const generated = await generateStructuredSummary({ supabase, paperId });
+    userLog.info("summary.generation.done", {
+      model: generated.model,
+      citations_count: generated.citations.length,
+      latency_ms: t.ms(),
+    });
 
     const { data: maxRow } = await supabase
       .from("paper_summaries")
@@ -91,7 +109,8 @@ export async function POST(_req: Request, { params }: Params) {
 
     return NextResponse.json({ summary: inserted });
   } catch (e) {
-    const message = e instanceof Error ? e.message : String(e);
-    return NextResponse.json({ error: "generation_failed", detail: message }, { status: 500 });
+    const cls = classifyError(e);
+    userLog.error("summary.generation.failed", { ...cls, latency_ms: t.ms() });
+    return NextResponse.json({ error: "generation_failed", detail: cls.message }, { status: 500 });
   }
 }

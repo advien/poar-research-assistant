@@ -1,9 +1,13 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { generateTerminologyExtraction } from "@/lib/analyses/generateTerminology";
+import { enforceRateLimit } from "@/lib/rate-limit/edge";
+import { classifyError, createRequestLogger, startTimer } from "@/lib/observability/logger";
 import type { TerminologyRow } from "@/types/db";
 
-export const runtime = "nodejs";
+// Edge runtime: terminology extraction uses the AI SDK + Supabase, both of
+// which run on Workers.
+export const runtime = "edge";
 export const maxDuration = 180;
 
 type Params = { params: Promise<{ id: string }> };
@@ -46,13 +50,24 @@ export async function GET(_req: Request, { params }: Params) {
   });
 }
 
-export async function POST(_req: Request, { params }: Params) {
+export async function POST(req: Request, { params }: Params) {
   const { id: paperId } = await params;
+  const log = createRequestLogger({
+    route: "/api/papers/:id/terminology",
+    extra: { paper_id: paperId },
+  });
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const userLog = log.child({ user_id: user.id });
+
+  const rl = await enforceRateLimit({ req, scope: "terminology", userId: user.id });
+  if (rl.limited) {
+    userLog.warn("ratelimit.blocked", { scope: "terminology" });
+    return rl.limited;
+  }
 
   const { data: paper } = await supabase
     .from("papers")
@@ -61,8 +76,15 @@ export async function POST(_req: Request, { params }: Params) {
     .single();
   if (!paper) return NextResponse.json({ error: "not_found" }, { status: 404 });
 
+  const t = startTimer();
   try {
     const generated = await generateTerminologyExtraction({ supabase, paperId });
+    userLog.info("terminology.generation.done", {
+      model: generated.model,
+      term_count: generated.payload.terms.length,
+      citations_count: generated.citations.length,
+      latency_ms: t.ms(),
+    });
 
     const { data: maxRow } = await supabase
       .from("paper_terminology")
@@ -90,7 +112,8 @@ export async function POST(_req: Request, { params }: Params) {
     if (insErr) return NextResponse.json({ error: insErr.message }, { status: 500 });
     return NextResponse.json({ terminology: inserted });
   } catch (e) {
-    const message = e instanceof Error ? e.message : String(e);
-    return NextResponse.json({ error: "generation_failed", detail: message }, { status: 500 });
+    const cls = classifyError(e);
+    userLog.error("terminology.generation.failed", { ...cls, latency_ms: t.ms() });
+    return NextResponse.json({ error: "generation_failed", detail: cls.message }, { status: 500 });
   }
 }

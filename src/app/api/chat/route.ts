@@ -1,42 +1,65 @@
-import { z } from "zod";
 import { createDataStreamResponse, streamText, type CoreMessage } from "ai";
-import { chatModel } from "@/lib/ai/anthropic";
+import { chatModel, CHAT_MODEL } from "@/lib/ai/anthropic";
 import { embedQuery } from "@/lib/ai/openai";
-import { RAG_SYSTEM_PROMPT, buildContextBlock } from "@/lib/ai/prompts";
+import { RAG_SYSTEM_PROMPT } from "@/lib/ai/prompts";
 import { fallbackTitle, generateChatTitle } from "@/lib/ai/title";
 import { createClient } from "@/lib/supabase/server";
-import type { Citation } from "@/types/db";
+import { ChatRequestSchema, safeParse, type ChatRequest } from "@/lib/api/schemas";
+import { retrieveContext } from "@/lib/rag/retrieve";
+import { enforceRateLimit } from "@/lib/rate-limit/edge";
+import { classifyError, createRequestLogger, startTimer } from "@/lib/observability/logger";
 
-export const runtime = "nodejs";
+// Cloudflare Pages / Workers requires Edge Runtime for non-static App Router
+// routes. The Anthropic chat call (via @ai-sdk/anthropic), the OpenAI embedding
+// call (via the openai SDK), and the Supabase clients all use fetch under the
+// hood and run cleanly on Edge / Workers.
+export const runtime = "edge";
 export const maxDuration = 60;
 
-const Body = z.object({
-  messages: z.array(
-    z.object({
-      role: z.enum(["user", "assistant", "system"]),
-      content: z.string(),
-    })
-  ),
-  paper_id: z.string().uuid().nullable().optional(),
-  chat_id: z.string().uuid().nullable().optional(),
-});
-
 export async function POST(req: Request) {
+  const log = createRequestLogger({ route: "/api/chat" });
+  const totalTimer = startTimer();
+
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!user) return new Response("unauthorized", { status: 401 });
+  if (!user) {
+    log.warn("auth.unauthorized");
+    return new Response("unauthorized", { status: 401 });
+  }
+  const userLog = log.child({ user_id: user.id });
 
-  let body: z.infer<typeof Body>;
-  try {
-    body = Body.parse(await req.json());
-  } catch (e) {
-    return new Response(`bad request: ${String(e)}`, { status: 400 });
+  // Rate limit: protects the most expensive endpoint in the app (Claude
+  // streaming). Default 10 / min / user; tunable via RATE_LIMIT_CHAT_PER_MIN.
+  const rl = await enforceRateLimit({ req, scope: "chat", userId: user.id });
+  if (rl.limited) {
+    userLog.warn("ratelimit.blocked", {
+      scope: "chat",
+      retry_after_sec: rl.result.retryAfterSec,
+    });
+    return rl.limited;
   }
 
+  let payload: unknown;
+  try {
+    payload = await req.json();
+  } catch {
+    userLog.warn("request.malformed_json");
+    return new Response("malformed JSON", { status: 400 });
+  }
+  const parsed = safeParse(ChatRequestSchema, payload);
+  if (!parsed.ok) {
+    userLog.warn("request.validation_failed", { detail: parsed.error });
+    return new Response(`bad request: ${parsed.error}`, { status: 400 });
+  }
+  const body: ChatRequest = parsed.data;
+
   const lastUser = [...body.messages].reverse().find((m) => m.role === "user");
-  if (!lastUser) return new Response("no user message", { status: 400 });
+  if (!lastUser) {
+    userLog.warn("request.no_user_message");
+    return new Response("no user message", { status: 400 });
+  }
 
   // -------------------------------------------------------------------------
   // 1. Resolve / create the chat row
@@ -47,34 +70,33 @@ export async function POST(req: Request) {
     paper_id: body.paper_id ?? null,
     firstUserMessage: lastUser.content,
   });
+  const chatLog = userLog.child({ chat_id: chatId, paper_id: body.paper_id ?? null });
 
   // -------------------------------------------------------------------------
   // 2. Retrieval (RAG) - embed query, hit match_chunks RPC under RLS
   // -------------------------------------------------------------------------
-  const k = body.paper_id ? 8 : 12;
-  const queryEmbedding = await embedQuery(lastUser.content);
-
-  const { data: matches, error: rpcErr } = await supabase.rpc("match_chunks", {
-    query_embedding: queryEmbedding,
-    match_count: k,
-    filter_paper_id: body.paper_id ?? null,
-  });
-  if (rpcErr) return new Response(`retrieval failed: ${rpcErr.message}`, { status: 500 });
-
-  const chunks = matches ?? [];
-
-  const citations: Citation[] = chunks.map((c, i) => ({
-    n: i + 1,
-    chunk_id: c.id,
-    paper_id: c.paper_id,
-    page_start: c.page_start,
-    page_end: c.page_end,
-    snippet: c.content.slice(0, 240),
-  }));
-
-  const contextBlock = chunks.length
-    ? buildContextBlock(chunks)
-    : "(no relevant chunks were retrieved from the user's library)";
+  let citations, contextBlock;
+  const retrievalTimer = startTimer();
+  try {
+    const ret = await retrieveContext({
+      supabase,
+      query: lastUser.content,
+      paperId: body.paper_id ?? null,
+      embedder: embedQuery,
+    });
+    citations = ret.citations;
+    contextBlock = ret.contextBlock;
+    chatLog.info("rag.retrieve.done", {
+      retrieved_chunks: ret.chunks.length,
+      retrieved_chunk_ids: ret.chunks.map((c) => c.id),
+      empty: ret.empty,
+      latency_ms: retrievalTimer.ms(),
+    });
+  } catch (e) {
+    const cls = classifyError(e);
+    chatLog.error("rag.retrieve.failed", { ...cls, latency_ms: retrievalTimer.ms() });
+    return new Response(cls.message, { status: 500 });
+  }
 
   const systemPrompt = `${RAG_SYSTEM_PROMPT}\n\n# Retrieved context\n\n${contextBlock}`;
 
@@ -98,18 +120,35 @@ export async function POST(req: Request) {
     execute: (writer) => {
       writer.writeData({ type: "citations", citations, chat_id: chatId, is_new: isNew });
 
+      const genTimer = startTimer();
       const result = streamText({
         model: chatModel,
         system: systemPrompt,
         messages,
         temperature: 0.2,
-        async onFinish({ text }) {
+        async onFinish({ text, usage, finishReason }) {
           await supabase.from("messages").insert({
             chat_id: chatId,
             user_id: user.id,
             role: "assistant",
             content: text,
             citations: citations as unknown as never,
+          });
+
+          chatLog.info("chat.generation.done", {
+            model: CHAT_MODEL,
+            finish_reason: finishReason,
+            latency_ms: genTimer.ms(),
+            total_latency_ms: totalTimer.ms(),
+            token_usage: usage
+              ? {
+                  prompt: usage.promptTokens,
+                  completion: usage.completionTokens,
+                  total: usage.totalTokens,
+                }
+              : null,
+            citations_count: citations.length,
+            is_new_chat: isNew,
           });
 
           // First turn: replace the placeholder title with a Claude-written one.
@@ -128,7 +167,9 @@ export async function POST(req: Request) {
       result.mergeIntoDataStream(writer);
     },
     onError(err) {
-      return err instanceof Error ? err.message : String(err);
+      const cls = classifyError(err);
+      chatLog.error("chat.generation.failed", cls);
+      return cls.message;
     },
   });
 }

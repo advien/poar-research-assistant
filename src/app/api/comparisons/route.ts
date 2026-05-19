@@ -1,18 +1,19 @@
 import { NextResponse } from "next/server";
-import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { generateComparison, orderPaperIds } from "@/lib/analyses/generateComparison";
+import { ComparisonRequestSchema, safeParse } from "@/lib/api/schemas";
+import { enforceRateLimit } from "@/lib/rate-limit/edge";
+import { classifyError, createRequestLogger, startTimer } from "@/lib/observability/logger";
 
-export const runtime = "nodejs";
+// Edge runtime is required by next-on-pages and works with the AI SDK +
+// Supabase. NOTE: comparison generation is the slowest server call in the app
+// (long Claude generateObject completion). On Cloudflare Workers Free this can
+// exceed the 30 s CPU cap; deploy on the Paid plan (5 min cap) for production.
+export const runtime = "edge";
 export const maxDuration = 240;
 
 const SELECT =
   "id,user_id,paper_a_id,paper_b_id,version,payload,citations,similarity_score,stronger_paper,contradiction_count,title,pinned,archived,model,prompt_version,created_at,updated_at";
-
-const Body = z.object({
-  paper_a_id: z.string().uuid(),
-  paper_b_id: z.string().uuid(),
-});
 
 export async function GET(req: Request) {
   const supabase = await createClient();
@@ -62,18 +63,33 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
+  const log = createRequestLogger({ route: "/api/comparisons" });
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const userLog = log.child({ user_id: user.id });
 
-  let body: z.infer<typeof Body>;
-  try {
-    body = Body.parse(await req.json());
-  } catch (e) {
-    return NextResponse.json({ error: "bad_request", detail: String(e) }, { status: 400 });
+  // Comparison generation is the slowest server call (Claude generateObject
+  // over both papers). Cap at 3 / min by default.
+  const rl = await enforceRateLimit({ req, scope: "comparison", userId: user.id });
+  if (rl.limited) {
+    userLog.warn("ratelimit.blocked", { scope: "comparison" });
+    return rl.limited;
   }
+
+  let payload: unknown;
+  try {
+    payload = await req.json();
+  } catch {
+    return NextResponse.json({ error: "bad_request", detail: "malformed JSON" }, { status: 400 });
+  }
+  const parsed = safeParse(ComparisonRequestSchema, payload);
+  if (!parsed.ok) {
+    return NextResponse.json({ error: "bad_request", detail: parsed.error }, { status: 400 });
+  }
+  const body = parsed.data;
   if (body.paper_a_id === body.paper_b_id) {
     return NextResponse.json({ error: "same_paper" }, { status: 400 });
   }
@@ -95,11 +111,21 @@ export async function POST(req: Request) {
     );
   }
 
+  const t = startTimer();
   try {
     const generated = await generateComparison({
       supabase,
       paperAId: a_id,
       paperBId: b_id,
+    });
+    userLog.info("comparison.generation.done", {
+      model: generated.model,
+      paper_a_id: a_id,
+      paper_b_id: b_id,
+      similarity_score: generated.payload.similarity_score,
+      contradiction_count: generated.payload.contradictions.length,
+      citations_count: generated.citations.length,
+      latency_ms: t.ms(),
     });
 
     const { data: maxRow } = await supabase
@@ -137,8 +163,9 @@ export async function POST(req: Request) {
 
     return NextResponse.json({ comparison: inserted });
   } catch (e) {
-    const message = e instanceof Error ? e.message : String(e);
-    return NextResponse.json({ error: "generation_failed", detail: message }, { status: 500 });
+    const cls = classifyError(e);
+    userLog.error("comparison.generation.failed", { ...cls, latency_ms: t.ms() });
+    return NextResponse.json({ error: "generation_failed", detail: cls.message }, { status: 500 });
   }
 }
 

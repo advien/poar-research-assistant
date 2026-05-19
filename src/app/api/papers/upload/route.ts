@@ -1,11 +1,12 @@
 import { NextResponse } from "next/server";
-import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
+import { UploadRequestSchema, safeParse, type UploadRequest } from "@/lib/api/schemas";
+import { enforceRateLimit } from "@/lib/rate-limit/edge";
 
-const Body = z.object({
-  filename: z.string().min(1).max(256),
-  size: z.number().int().positive().max(100 * 1024 * 1024),
-});
+// Edge runtime: this route only mints a signed Supabase Storage upload URL.
+// The browser PUTs the bytes directly to Storage so the worker never has to
+// stream the file body through itself.
+export const runtime = "edge";
 
 export async function POST(req: Request) {
   const supabase = await createClient();
@@ -14,12 +15,22 @@ export async function POST(req: Request) {
   } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
-  let body: z.infer<typeof Body>;
+  // Rate limit: 3 uploads/min by default. The signed URL itself is single-shot
+  // so this caps how often we hand out write-credentials to Storage.
+  const rl = await enforceRateLimit({ req, scope: "upload", userId: user.id });
+  if (rl.limited) return rl.limited;
+
+  let payload: unknown;
   try {
-    body = Body.parse(await req.json());
-  } catch (e) {
-    return NextResponse.json({ error: "bad_request", detail: String(e) }, { status: 400 });
+    payload = await req.json();
+  } catch {
+    return NextResponse.json({ error: "bad_request", detail: "malformed JSON" }, { status: 400 });
   }
+  const parsed = safeParse(UploadRequestSchema, payload);
+  if (!parsed.ok) {
+    return NextResponse.json({ error: "bad_request", detail: parsed.error }, { status: 400 });
+  }
+  const body: UploadRequest = parsed.data;
 
   // 1. Insert pending paper row to mint an id.
   const { data: paper, error: insertErr } = await supabase
