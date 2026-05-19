@@ -1,40 +1,74 @@
 import { NextResponse } from "next/server";
-import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
-import { ingestPaper } from "@/lib/ingest";
+import { enqueueIngest } from "@/lib/ingest";
+import { IngestRequestSchema, safeParse } from "@/lib/api/schemas";
+import { enforceRateLimit } from "@/lib/rate-limit/edge";
+import { classifyError, createRequestLogger } from "@/lib/observability/logger";
 
-export const runtime = "nodejs";
+// Edge runtime: the ingestion pipeline runs on Workers because every step is
+// fetch-based (Supabase Storage download, Anthropic metadata call via the AI
+// SDK, OpenAI embeddings) and `unpdf` is explicitly built for serverless /
+// worker runtimes (it bundles pdfjs in a worker-compatible shape).
+//
+// CPU caveat: parsing a long PDF + generating metadata + embedding chunks +
+// generating a summary can exceed Cloudflare Workers Free's 30 s CPU cap. For
+// large papers, either deploy on the Workers Paid plan (5 min cap) or move
+// ingestion to a background queue (Cloudflare Queues / Inngest / Trigger.dev).
+export const runtime = "edge";
 export const maxDuration = 300; // 5 minutes for slow PDFs / metadata calls
 
-const Body = z.object({ paper_id: z.string().uuid() });
-
 export async function POST(req: Request) {
+  const log = createRequestLogger({ route: "/api/papers/ingest" });
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const userLog = log.child({ user_id: user.id });
 
-  let body: z.infer<typeof Body>;
-  try {
-    body = Body.parse(await req.json());
-  } catch (e) {
-    return NextResponse.json({ error: "bad_request", detail: String(e) }, { status: 400 });
+  const rl = await enforceRateLimit({ req, scope: "ingest", userId: user.id });
+  if (rl.limited) {
+    userLog.warn("ratelimit.blocked", { scope: "ingest" });
+    return rl.limited;
   }
 
-  // Verify the paper belongs to the caller (RLS will also enforce this on read).
+  let payload: unknown;
+  try {
+    payload = await req.json();
+  } catch {
+    userLog.warn("request.malformed_json");
+    return NextResponse.json({ error: "bad_request", detail: "malformed JSON" }, { status: 400 });
+  }
+  const parsed = safeParse(IngestRequestSchema, payload);
+  if (!parsed.ok) {
+    userLog.warn("request.validation_failed", { detail: parsed.error });
+    return NextResponse.json({ error: "bad_request", detail: parsed.error }, { status: 400 });
+  }
+  const body = parsed.data;
+
   const { data: paper } = await supabase
     .from("papers")
     .select("id")
     .eq("id", body.paper_id)
     .single();
-  if (!paper) return NextResponse.json({ error: "not_found" }, { status: 404 });
+  if (!paper) {
+    userLog.warn("paper.not_found", { paper_id: body.paper_id });
+    return NextResponse.json({ error: "not_found" }, { status: 404 });
+  }
 
   try {
-    const result = await ingestPaper(body.paper_id);
+    // `enqueueIngest` is the swap-in seam for a real queue (Cloudflare Queues
+    // / Inngest / Trigger.dev). Today it executes inline with bounded retries;
+    // tomorrow it can post to a queue and return immediately. The route shape
+    // does not change in either case. We pass our request logger so the
+    // pipeline-stage logs share the same request_id and user_id.
+    const result = await enqueueIngest(body.paper_id, {
+      logger: userLog.child({ paper_id: body.paper_id }),
+    });
     return NextResponse.json({ ok: true, ...result });
   } catch (e) {
-    const message = e instanceof Error ? e.message : String(e);
-    return NextResponse.json({ error: "ingest_failed", detail: message }, { status: 500 });
+    const cls = classifyError(e);
+    userLog.error("ingest.failed", { ...cls, paper_id: body.paper_id });
+    return NextResponse.json({ error: "ingest_failed", detail: cls.message }, { status: 500 });
   }
 }

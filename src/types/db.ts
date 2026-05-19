@@ -3,7 +3,14 @@
  * once the project is linked to a Supabase instance.
  */
 
-export type PaperStatus = "pending" | "parsing" | "embedding" | "ready" | "failed";
+export type PaperStatus =
+  | "pending"
+  | "parsing"
+  | "embedding"
+  | "summarizing"
+  | "ready"
+  | "failed"
+  | "retrying";
 
 export type Citation = {
   n: number;
@@ -29,6 +36,12 @@ export type PaperRow = {
   status: PaperStatus;
   error: string | null;
   summary: string | null;
+  /** Monotonically increasing per-paper retry counter. */
+  ingest_attempts: number;
+  ingest_started_at: string | null;
+  ingest_finished_at: string | null;
+  /** 0..100, advisory only. 100 implies status === "ready". */
+  ingest_progress_pct: number;
   created_at: string;
   updated_at: string;
 };
@@ -198,6 +211,10 @@ export type PaperInsert = {
   status?: PaperStatus;
   error?: string | null;
   summary?: string | null;
+  ingest_attempts?: number;
+  ingest_started_at?: string | null;
+  ingest_finished_at?: string | null;
+  ingest_progress_pct?: number;
   created_at?: string;
   updated_at?: string;
 };
@@ -217,6 +234,10 @@ export type PaperUpdate = {
   status?: PaperStatus;
   error?: string | null;
   summary?: string | null;
+  ingest_attempts?: number;
+  ingest_started_at?: string | null;
+  ingest_finished_at?: string | null;
+  ingest_progress_pct?: number;
   created_at?: string;
   updated_at?: string;
 };
