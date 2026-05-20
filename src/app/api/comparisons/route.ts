@@ -5,12 +5,9 @@ import { ComparisonRequestSchema, safeParse } from "@/lib/api/schemas";
 import { enforceRateLimit } from "@/lib/rate-limit/edge";
 import { classifyError, createRequestLogger, startTimer } from "@/lib/observability/logger";
 
-// Edge runtime is required by next-on-pages and works with the AI SDK +
-// Supabase. NOTE: comparison generation is the slowest server call in the app
-// (long Claude generateObject completion). On Cloudflare Workers Free this can
-// exceed the 30 s CPU cap; deploy on the Paid plan (5 min cap) for production.
-export const runtime = "edge";
-export const maxDuration = 240;
+// Comparison generation is the slowest server call in the app (long Claude
+// generateObject completion). On Cloudflare Workers Free this can exceed the
+// 30 s CPU cap; deploy on the Paid plan (5 min cap) for production.
 
 const SELECT =
   "id,user_id,paper_a_id,paper_b_id,version,payload,citations,similarity_score,stronger_paper,contradiction_count,title,pinned,archived,model,prompt_version,created_at,updated_at";

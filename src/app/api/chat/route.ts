@@ -9,12 +9,9 @@ import { retrieveContext } from "@/lib/rag/retrieve";
 import { enforceRateLimit } from "@/lib/rate-limit/edge";
 import { classifyError, createRequestLogger, startTimer } from "@/lib/observability/logger";
 
-// Cloudflare Pages / Workers requires Edge Runtime for non-static App Router
-// routes. The Anthropic chat call (via @ai-sdk/anthropic), the OpenAI embedding
-// call (via the openai SDK), and the Supabase clients all use fetch under the
-// hood and run cleanly on Edge / Workers.
-export const runtime = "edge";
-export const maxDuration = 60;
+// Runs on the Cloudflare Worker (Node-compat) bundle produced by
+// @opennextjs/cloudflare. Every external call (Anthropic, OpenAI, Supabase)
+// is fetch-based and works under the `nodejs_compat` Workers flag.
 
 /** Per-answer output-token cap. Tunable via env to control cost / latency. */
 const DEFAULT_CHAT_MAX_OUTPUT_TOKENS = 2048;

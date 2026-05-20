@@ -4,10 +4,6 @@ import { fallbackTitle, generateChatTitle } from "@/lib/ai/title";
 
 type Params = { params: Promise<{ id: string }> };
 
-// Edge runtime: Anthropic via @ai-sdk/anthropic uses fetch and runs on Workers.
-export const runtime = "edge";
-export const maxDuration = 30;
-
 /**
  * POST /api/chats/:id/title
  * Generate (or regenerate) a chat title from the first user/assistant exchange.

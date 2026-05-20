@@ -4,7 +4,6 @@ import { ChatWorkspaceLayout } from "@/components/chat/ChatWorkspaceLayout";
 import { CrossLibraryChat } from "../_components/CrossLibraryChat";
 import type { Citation } from "@/types/db";
 
-export const runtime = "edge";
 export const dynamic = "force-dynamic";
 
 export default async function ChatByIdPage({

@@ -2,7 +2,6 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { ComparePicker } from "./_components/ComparePicker";
 
-export const runtime = "edge";
 export const dynamic = "force-dynamic";
 
 export default async function ComparePage({

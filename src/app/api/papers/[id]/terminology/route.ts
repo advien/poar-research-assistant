@@ -5,11 +5,6 @@ import { enforceRateLimit } from "@/lib/rate-limit/edge";
 import { classifyError, createRequestLogger, startTimer } from "@/lib/observability/logger";
 import type { TerminologyRow } from "@/types/db";
 
-// Edge runtime: terminology extraction uses the AI SDK + Supabase, both of
-// which run on Workers.
-export const runtime = "edge";
-export const maxDuration = 180;
-
 type Params = { params: Promise<{ id: string }> };
 const SELECT =
   "id,user_id,paper_id,version,payload,citations,term_count,pinned,archived,model,prompt_version,created_at,updated_at";

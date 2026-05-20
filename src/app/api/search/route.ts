@@ -3,8 +3,6 @@ import { createClient } from "@/lib/supabase/server";
 import { embedQuery } from "@/lib/ai/openai";
 import { SearchRequestSchema, safeParse } from "@/lib/api/schemas";
 
-export const runtime = "edge";
-
 export async function POST(req: Request) {
   const supabase = await createClient();
   const {

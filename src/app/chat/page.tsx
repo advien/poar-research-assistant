@@ -3,7 +3,6 @@ import { createClient } from "@/lib/supabase/server";
 import { ChatWorkspaceLayout } from "@/components/chat/ChatWorkspaceLayout";
 import { CrossLibraryChat } from "./_components/CrossLibraryChat";
 
-export const runtime = "edge";
 export const dynamic = "force-dynamic";
 
 export default async function CrossLibraryChatPage() {

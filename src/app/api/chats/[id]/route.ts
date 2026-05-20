@@ -3,8 +3,6 @@ import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import type { ChatWithMessages } from "@/types/db";
 
-export const runtime = "edge";
-
 type Params = { params: Promise<{ id: string }> };
 
 const Patch = z.object({

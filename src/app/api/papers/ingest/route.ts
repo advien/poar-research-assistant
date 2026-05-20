@@ -5,17 +5,15 @@ import { IngestRequestSchema, safeParse } from "@/lib/api/schemas";
 import { enforceRateLimit } from "@/lib/rate-limit/edge";
 import { classifyError, createRequestLogger } from "@/lib/observability/logger";
 
-// Edge runtime: the ingestion pipeline runs on Workers because every step is
-// fetch-based (Supabase Storage download, Anthropic metadata call via the AI
-// SDK, OpenAI embeddings) and `unpdf` is explicitly built for serverless /
-// worker runtimes (it bundles pdfjs in a worker-compatible shape).
+// The ingestion pipeline is fetch-based end-to-end (Supabase Storage download,
+// Anthropic metadata, OpenAI embeddings) and `unpdf` is built for serverless /
+// worker runtimes (bundles pdfjs in a worker-compatible shape). It runs in
+// the Worker's `nodejs_compat` bundle produced by @opennextjs/cloudflare.
 //
 // CPU caveat: parsing a long PDF + generating metadata + embedding chunks +
 // generating a summary can exceed Cloudflare Workers Free's 30 s CPU cap. For
 // large papers, either deploy on the Workers Paid plan (5 min cap) or move
 // ingestion to a background queue (Cloudflare Queues / Inngest / Trigger.dev).
-export const runtime = "edge";
-export const maxDuration = 300; // 5 minutes for slow PDFs / metadata calls
 
 export async function POST(req: Request) {
   const log = createRequestLogger({ route: "/api/papers/ingest" });

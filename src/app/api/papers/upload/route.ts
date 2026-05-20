@@ -3,10 +3,9 @@ import { createClient } from "@/lib/supabase/server";
 import { UploadRequestSchema, safeParse, type UploadRequest } from "@/lib/api/schemas";
 import { enforceRateLimit } from "@/lib/rate-limit/edge";
 
-// Edge runtime: this route only mints a signed Supabase Storage upload URL.
-// The browser PUTs the bytes directly to Storage so the worker never has to
-// stream the file body through itself.
-export const runtime = "edge";
+// This route only mints a signed Supabase Storage upload URL. The browser PUTs
+// the bytes directly to Storage so the worker never has to stream the file
+// body through itself.
 
 export async function POST(req: Request) {
   const supabase = await createClient();

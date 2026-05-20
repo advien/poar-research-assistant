@@ -5,11 +5,8 @@ import { enforceRateLimit } from "@/lib/rate-limit/edge";
 import { classifyError, createRequestLogger, startTimer } from "@/lib/observability/logger";
 import type { SummaryRow } from "@/types/db";
 
-// Edge runtime: structured summary generation uses the AI SDK + Supabase, both
-// of which run on Workers. The CPU envelope can be tight on Free; use Paid for
-// production-sized papers.
-export const runtime = "edge";
-export const maxDuration = 120;
+// Structured summary generation uses the AI SDK + Supabase. The CPU envelope
+// can be tight on Workers Free; use Paid for production-sized papers.
 
 type Params = { params: Promise<{ id: string }> };
 const SELECT =
