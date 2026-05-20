@@ -11,6 +11,13 @@ compatibility_date = "2025-04-01"
 compatibility_flags = ["nodejs_compat"]
 main = ".open-next/worker.js"
 
+# Preserve plaintext variables set in the Cloudflare dashboard across deploys.
+# Without this, `wrangler deploy` resets the deployed worker's plaintext vars
+# to match `[vars]` in this file - which would silently wipe the `NEXT_PUBLIC_*`
+# values we keep in the dashboard (Supabase URL + anon key) on every push.
+# Secrets are unaffected by this flag (they're managed separately).
+keep_vars = true
+
 # Asset bindings emitted by @opennextjs/cloudflare's build step.
 [assets]
 directory = ".open-next/assets"
