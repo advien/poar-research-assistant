@@ -313,18 +313,47 @@ Cloudflare Logpush / Vercel Logs / Datadog all index these out of the box.
 Sample queries (slowest chats, empty-retrieval rate, token usage by model
 per day) are listed in [`docs/engineering/observability.md`](docs/engineering/observability.md).
 
+### RAG Trace Store
+
+Every completed chat request writes one row to the `rag_traces` Supabase
+table via [`src/lib/observability/trace.ts`](src/lib/observability/trace.ts).
+The write is fire-and-forget inside `onFinish` — it never blocks the
+streaming response.
+
+| Column | What it captures |
+| --- | --- |
+| `retrieval_latency_ms` | Time from embed-query call to RPC return |
+| `retrieval_chunk_count` | Number of chunks returned by `match_chunks` |
+| `retrieval_top_score` | Highest cosine similarity in the result set (0–1) |
+| `retrieval_empty` | True when the RPC returned zero rows |
+| `generation_latency_ms` | Time from `streamText` start to `onFinish` |
+| `total_latency_ms` | End-to-end wall time for the full request |
+| `input_tokens` / `output_tokens` | Token usage from the Anthropic response |
+| `finish_reason` | `stop` / `length` / `error` from the model |
+| `eval_faithfulness` | DeepEval score (populated by the eval pipeline) |
+| `eval_answer_relevancy` | DeepEval score (populated by the eval pipeline) |
+
+Rows are protected by RLS — users can read only their own traces; the eval
+pipeline uses the service-role key to write scores back.
+
 ---
 
 ## Evaluation
 
-A measurable RAG-quality harness lives under [`evals/`](evals):
+The project has two complementary eval tools:
 
-- **`evals/rag-eval.json`** — eight POAR-domain probes (dataset, amputation
-  level, device, outcomes, limitations, control strategy, plus two
-  out-of-corpus refusal probes).
-- **`evals/run.ts`** — Node CLI that POSTs each question through `/api/chat`,
-  reads the streamed response, and reports retrieval hit rate, citation
-  coverage, answer-match rate, refusal correctness, and p50/p95/max latency.
+### 1. Pre-deploy regression harness (`evals/run.ts`)
+
+A Node CLI that fires real HTTP requests at a live deployment and verifies
+the end-to-end RAG pipeline against a labelled dataset.
+
+- **`evals/rag-eval.json`** — eight POAR-domain probes: dataset, amputation
+  level, device, outcomes, limitations, control strategy, and two
+  out-of-corpus refusal probes.
+- **`evals/run.ts`** — POSTs each question through `/api/chat`, reads the
+  streamed response (text + citation annotations), and reports retrieval hit
+  rate, citation coverage, answer-match rate, refusal correctness, and
+  p50/p95/max latency.
 
 ```bash
 POAR_API_URL=http://localhost:3000 \
@@ -332,9 +361,33 @@ POAR_AUTH_COOKIE='sb-access-token=...; sb-refresh-token=...' \
 npm run eval:rag
 ```
 
-The runner returns a non-zero exit code when retrieval hit rate drops below
-70% or refusal accuracy drops below 80%, making it suitable to gate deploys
-on. Full design + adding-new-probes guide:
+Returns a non-zero exit code when retrieval hit rate drops below 70% or
+refusal accuracy drops below 80%, making it suitable to gate deploys on.
+
+### 2. Production quality monitor (`evals/run.py`)
+
+A Python script that reads production traces from `rag_traces` and scores
+them with [DeepEval](https://github.com/confident-ai/deepeval) — no live
+traffic required.
+
+- **Faithfulness** — does the answer stay within the retrieved context?
+- **Answer Relevancy** — does the answer address the user's question?
+- **Refusal detection** — port of `metrics.ts` `detectRefusal`; refusals are
+  scored 0.0 directly without an LLM judge call (saves cost).
+
+Scores are written back to `eval_faithfulness` / `eval_answer_relevancy` in
+`rag_traces` incrementally — a crash mid-batch does not lose earlier results.
+
+```bash
+pip install -r evals/requirements.txt
+python evals/run.py          # scores up to 50 unscored rows, prints a report
+```
+
+A GitHub Actions workflow ([`.github/workflows/weekly-eval.yml`](.github/workflows/weekly-eval.yml))
+runs this automatically every Monday at 09:00 UTC, and can be triggered
+manually from the Actions tab via `workflow_dispatch`.
+
+Full design and adding-new-probes guide:
 [`docs/engineering/evaluation.md`](docs/engineering/evaluation.md).
 
 ---
@@ -466,6 +519,11 @@ npm run check  # lint + typecheck + tests, the same gate the CI runs
 
 The full pipeline lives in [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
 
+A separate **weekly eval workflow** ([`.github/workflows/weekly-eval.yml`](.github/workflows/weekly-eval.yml))
+runs `evals/run.py` every Monday against production `rag_traces`, scores
+unscored rows with DeepEval (faithfulness + answer relevancy), and writes
+results back to Supabase. Triggerable manually via `workflow_dispatch`.
+
 ---
 
 ## Local Development
@@ -554,6 +612,7 @@ order.
 | `0004_chat_history.sql` | conversation pin / archive / `last_message_at` / `message_count` + `search_chats` RPC |
 | `0005_analyses.sql` | `paper_summaries`, `paper_terminology`, `paper_comparisons` + unified `search_analyses` RPC |
 | `0006_ingestion_jobs.sql` | extends `papers.status` with `summarizing` / `retrying`, adds `ingest_attempts` / `ingest_progress_pct` / `ingest_started_at` / `ingest_finished_at`, plus the trigger that maintains them |
+| `0007_rag_traces.sql` | `rag_traces` table for per-request observability (retrieval + generation metrics, eval scores); RLS + indexes |
 
 All migrations are idempotent.
 
