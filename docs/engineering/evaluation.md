@@ -19,7 +19,10 @@ matter for a production RAG system:
 | --- | --- |
 | `evals/rag-eval.json` | The eval dataset. Eight items today: six retrieval probes, two refusal probes. |
 | `evals/run.ts` | Node CLI runner. Reads the dataset, hits `/api/chat`, computes metrics, prints a table + JSON summary. |
-| `npm run eval:rag` | Entry point. |
+| `evals/run.py` | Python script. Reads unscored rows from `rag_traces`, runs DeepEval, writes scores back. |
+| `evals/requirements.txt` | Python dependencies for `run.py` (`deepeval`, `supabase`, `python-dotenv`). |
+| `.github/workflows/weekly-eval.yml` | GitHub Actions cron — runs `run.py` every Monday 09:00 UTC. |
+| `npm run eval:rag` | Entry point for `run.ts`. |
 
 ## Item shape
 
@@ -104,6 +107,84 @@ This makes it suitable to gate deploys on. We deliberately do **not** run it
 in the GitHub Actions CI workflow (it would need real Anthropic + OpenAI
 credentials and a populated Supabase instance), but the same script can run
 from a deploy-time job that already has those secrets.
+
+---
+
+## Production quality monitor (`evals/run.py`)
+
+While `run.ts` measures the pipeline before a deploy, `run.py` monitors
+quality on real production traffic after it. It reads unscored rows from
+`rag_traces` (populated by `src/lib/observability/trace.ts` on every chat
+request) and scores them with [DeepEval](https://github.com/confident-ai/deepeval).
+
+### Metrics
+
+| Metric | How it works |
+| --- | --- |
+| **Faithfulness** | Does the answer stay within the retrieved context? Scored 0–1 via DeepEval + `gpt-4o-mini` as judge. |
+| **Answer Relevancy** | Does the answer address the user's question? Scored 0–1 via DeepEval + `gpt-4o-mini`. |
+| **Refusal detection** | Port of `metrics.ts` `detectRefusal`. Scored 0.0 directly — no LLM judge call needed, saves cost. |
+
+Scores are written back to `rag_traces.eval_faithfulness` /
+`rag_traces.eval_answer_relevancy` incrementally. If the script crashes
+mid-batch, already-scored rows are not re-evaluated on the next run.
+
+### Running locally
+
+```bash
+pip install -r evals/requirements.txt
+python evals/run.py          # scores up to 50 unscored rows, prints report
+EVAL_BATCH_SIZE=10 python evals/run.py   # smaller batch
+```
+
+Required env vars (same as `.env.local`):
+
+| Variable | Purpose |
+| --- | --- |
+| `NEXT_PUBLIC_SUPABASE_URL` | Supabase project URL |
+| `SUPABASE_SERVICE_ROLE_KEY` | Service role key — bypasses RLS to write scores |
+| `OPENAI_API_KEY` | DeepEval uses OpenAI as judge model |
+
+### GitHub Actions schedule
+
+`.github/workflows/weekly-eval.yml` runs `run.py` every Monday at 09:00 UTC.
+Can be triggered manually from the Actions tab via `workflow_dispatch` — useful
+to score a backlog of traces immediately after adding the pipeline.
+
+Secrets required in the repo (Settings → Secrets → Actions):
+`NEXT_PUBLIC_SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `OPENAI_API_KEY`.
+
+### Sample report output
+
+```
+======================================================
+  RAG Eval Report — 2026-06-02 09:00 UTC
+======================================================
+  Rows evaluated      : 47
+  Refusals detected   : 3 (6%)
+
+  Faithfulness
+    mean  : 0.891
+    median: 0.920
+    min   : 0.410
+    below 0.7: 2 rows
+
+  Answer Relevancy
+    mean  : 0.876
+    median: 0.900
+    min   : 0.500
+    below 0.7: 3 rows
+======================================================
+```
+
+### Limitations
+
+- `retrieval_context` passed to DeepEval is the answer text itself (a
+  conservative proxy), not the original chunk content. Faithfulness scores
+  will be slightly inflated as a result. A future improvement is to store
+  chunk text in a separate `eval_chunks` table and join at eval time.
+- `gpt-4o-mini` is used as judge to keep cost low (~$0.01 per 50 rows).
+  Swap to `gpt-4o` in `run.py` for higher accuracy on ambiguous cases.
 
 ## How metrics are computed
 

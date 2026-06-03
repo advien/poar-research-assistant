@@ -150,6 +150,86 @@ order by day desc;
 - **No PII in `error_type`.** Use the classified label; the original message
   goes in `message`.
 
+## RAG Trace Store
+
+In addition to ephemeral log lines, every completed chat request writes one
+persistent row to the `rag_traces` Supabase table via
+[`src/lib/observability/trace.ts`](../../src/lib/observability/trace.ts).
+
+The write is **fire-and-forget** inside `streamText`'s `onFinish` callback —
+it never blocks the streaming response. Failures are caught and logged as
+`trace.write.failed` warnings; they do not surface to the user.
+
+### Why a separate table and not just logs
+
+Log lines are ephemeral and platform-dependent (Cloudflare Logpush, Vercel
+Logs). `rag_traces` is durable, queryable with plain SQL, and — crucially —
+has two nullable columns (`eval_faithfulness`, `eval_answer_relevancy`) that
+the weekly eval pipeline fills in asynchronously. Logs cannot be mutated
+after the fact; a Postgres row can.
+
+### Schema
+
+| Column | Type | What it captures |
+| --- | --- | --- |
+| `request_id` | text | Ties the row to the structured log lines for the same request. |
+| `user_id` | uuid | RLS key — users can only read their own traces. |
+| `chat_id` | uuid | Which conversation this turn belongs to. |
+| `paper_id` | uuid\|null | Set for per-paper chats; null for cross-library. |
+| `query` | text | The user's question (stored for eval replay). |
+| `model` | text | The Claude model string used for generation. |
+| `retrieval_latency_ms` | integer | Time from embed-query call to RPC return. |
+| `retrieval_chunk_count` | integer | Number of chunks returned by `match_chunks`. |
+| `retrieval_top_score` | real | Highest cosine similarity in the result set (0–1). |
+| `retrieval_empty` | boolean | True when the RPC returned zero rows. |
+| `generation_latency_ms` | integer | Time from `streamText` start to `onFinish`. |
+| `total_latency_ms` | integer | End-to-end wall time for the full request. |
+| `input_tokens` | integer | Prompt tokens from the Anthropic response. |
+| `output_tokens` | integer | Completion tokens from the Anthropic response. |
+| `finish_reason` | text | `stop` / `length` / `error` from the model. |
+| `citations_count` | integer | Number of citations returned to the client. |
+| `eval_faithfulness` | real\|null | DeepEval faithfulness score (0–1), written by `evals/run.py`. |
+| `eval_answer_relevancy` | real\|null | DeepEval answer relevancy score (0–1), written by `evals/run.py`. |
+| `answer_text` | text | Full assistant response, stored for eval replay. |
+
+### RLS
+
+Users can `SELECT` their own rows (`auth.uid() = user_id`). The eval pipeline
+uses the service-role key to `UPDATE` eval score columns — this bypasses RLS
+and is intentional (the eval runner is a trusted offline job, not a user
+request).
+
+### Sample SQL queries
+
+```sql
+-- Average retrieval latency and top similarity score by week
+select date_trunc('week', created_at) as week,
+       avg(retrieval_latency_ms)      as avg_retrieval_ms,
+       avg(retrieval_top_score)       as avg_top_score,
+       sum(case when retrieval_empty then 1 else 0 end) * 1.0 / count(*) as empty_rate
+from rag_traces
+group by 1 order by 1 desc;
+
+-- Rows with low faithfulness that need attention
+select id, query, eval_faithfulness, eval_answer_relevancy, created_at
+from rag_traces
+where eval_faithfulness < 0.7
+order by created_at desc
+limit 20;
+
+-- Token spend per day
+select date_trunc('day', created_at) as day,
+       sum(input_tokens)             as prompt_tokens,
+       sum(output_tokens)            as completion_tokens
+from rag_traces
+group by 1 order by 1 desc;
+
+-- Unscored rows (not yet evaluated by run.py)
+select count(*) from rag_traces where eval_faithfulness is null;
+```
+
+---
+
 ## Tradeoffs
 
 - **In-process, no remote sink.** Workers cannot run background flush loops
