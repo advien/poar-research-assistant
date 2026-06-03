@@ -5,9 +5,10 @@ import { RAG_SYSTEM_PROMPT } from "@/lib/ai/prompts";
 import { fallbackTitle, generateChatTitle } from "@/lib/ai/title";
 import { createClient } from "@/lib/supabase/server";
 import { ChatRequestSchema, safeParse, type ChatRequest } from "@/lib/api/schemas";
-import { retrieveContext } from "@/lib/rag/retrieve";
+import { retrieveContext, type MatchedChunk } from "@/lib/rag/retrieve";
 import { enforceRateLimit } from "@/lib/rate-limit/edge";
 import { classifyError, createRequestLogger, startTimer } from "@/lib/observability/logger";
+import { writeTrace } from "@/lib/observability/trace";
 
 // Runs on the Cloudflare Worker (Node-compat) bundle produced by
 // @opennextjs/cloudflare. Every external call (Anthropic, OpenAI, Supabase)
@@ -81,6 +82,12 @@ export async function POST(req: Request) {
   // 2. Retrieval (RAG) - embed query, hit match_chunks RPC under RLS
   // -------------------------------------------------------------------------
   let citations, contextBlock;
+
+  // Declared in POST scope so onFinish closure can read them for trace.
+  let retrievedChunks: MatchedChunk[] = [];
+  let retrievalEmpty = false;
+  let retrievalLatencyMs = 0;
+
   const retrievalTimer = startTimer();
   try {
     const ret = await retrieveContext({
@@ -91,11 +98,14 @@ export async function POST(req: Request) {
     });
     citations = ret.citations;
     contextBlock = ret.contextBlock;
+    retrievedChunks = ret.chunks;
+    retrievalEmpty = ret.empty;
+    retrievalLatencyMs = retrievalTimer.ms();
     chatLog.info("rag.retrieve.done", {
       retrieved_chunks: ret.chunks.length,
       retrieved_chunk_ids: ret.chunks.map((c) => c.id),
       empty: ret.empty,
-      latency_ms: retrievalTimer.ms(),
+      latency_ms: retrievalLatencyMs,
     });
   } catch (e) {
     const cls = classifyError(e);
@@ -170,6 +180,30 @@ export async function POST(req: Request) {
             await supabase.from("chats").update({ title }).eq("id", chatId);
             writer.writeData({ type: "title", chat_id: chatId, title });
           }
+
+          // ---------------------------------------------------------------
+          // 4. Write RAG trace (fire-and-forget, never throws)
+          // ---------------------------------------------------------------
+          await writeTrace(supabase, chatLog, {
+            requestId: log.context.request_id as string,
+            userId: user.id,
+            chatId,
+            paperId: body.paper_id ?? null,
+            query: lastUser.content,
+            model: CHAT_MODEL,
+
+            retrievalLatencyMs,
+            chunks: retrievedChunks,
+            retrievalEmpty,
+
+            generationLatencyMs: genTimer.ms(),
+            totalLatencyMs: totalTimer.ms(),
+            inputTokens: usage?.promptTokens ?? null,
+            outputTokens: usage?.completionTokens ?? null,
+            finishReason,
+            citationsCount: citations.length,
+            answerText: text,
+          });
         },
       });
 
