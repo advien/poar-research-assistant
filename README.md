@@ -218,16 +218,15 @@ wrangler.toml, open-next.config.ts Cloudflare config
 
 ## Screenshots
 
-> Screenshots will be added once a public demo at <https://research.advien.tech> is live.
-
 | | |
 | --- | --- |
-| Library + tag filter | _placeholder_ |
-| Paper view: PDF + chat with inline citations | _placeholder_ |
-| Structured Summary tab | _placeholder_ |
-| Terminology Explain Mode | _placeholder_ |
-| Compare Papers side-by-side | _placeholder_ |
-| Conversation sidebar | _placeholder_ |
+| Drop PDF | ![Drop PDF](screenshots/poar-screen-2-drop-pdf.png) |
+| Library + tag filter | ![Library](screenshots/poar-screen-3-when-dropped.png) |
+| Paper view: PDF | ![Paper view](screenshots/poar-screen-4-window-or-work.png) |
+| Structured Summary tab | ![Summary](screenshots/poar-screen-6-summary.png) |
+| Terminology Explain Mode | ![Terminology](screenshots/poar-screen-5-terminology.png) |
+| Chat with inline citations | ![Chat](screenshots/poar-screen-7-cross-library-chat.png) ![Chat action](screenshots/poar-screen-8-cross-library-chat-action.png) |
+| Compare Papers side-by-side | see [live demo](https://research.advien.tech) |
 
 > A walkthrough demo GIF / video of the chat + citations + paper view will
 > be linked here once recorded. The ingestion → ready timeline is best seen
