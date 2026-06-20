@@ -226,7 +226,7 @@ wrangler.toml, open-next.config.ts Cloudflare config
 | Structured Summary tab | ![Summary](screenshots/poar-screen-6-summary.png) |
 | Terminology Explain Mode | ![Terminology](screenshots/poar-screen-5-terminology.png) |
 | Chat with inline citations | ![Chat](screenshots/poar-screen-7-cross-library-chat.png) ![Chat action](screenshots/poar-screen-8-cross-library-chat-action.png) |
-| Compare Papers side-by-side | see [live demo](https://research.advien.tech) |
+| Compare Papers side-by-side | ![Comparison](screenshots/poar-screen-9-comparison.png) ![Comparison view](screenshots/poar-screen-9-comparison-view.png) |
 
 > A walkthrough demo GIF / video of the chat + citations + paper view will
 > be linked here once recorded. The ingestion → ready timeline is best seen
