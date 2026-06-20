@@ -153,12 +153,25 @@ export function createRequestLogger(args: {
  */
 export function classifyError(err: unknown): { error_type: string; message: string } {
   if (err instanceof Error) {
-    const msg = err.message ?? String(err);
+    // OpenAI / Anthropic SDKs surface transport failures as a generic
+    // `APIConnectionError` ("Connection error.") and stash the real reason
+    // (ECONNRESET, fetch failed, ENOTFOUND, ...) on `err.cause`. Fold the
+    // cause into the message so dashboards and `papers.error` show why the
+    // outbound request failed instead of an opaque "Connection error.".
+    const cause = (err as { cause?: unknown }).cause;
+    const causeMsg =
+      cause instanceof Error ? cause.message : cause != null ? String(cause) : "";
+    const msg = causeMsg ? `${err.message} (${causeMsg})` : err.message ?? String(err);
     if (/permission denied|unauthorized|RLS/i.test(msg)) {
       return { error_type: "auth", message: msg };
     }
     if (/rate.?limit|429/i.test(msg)) return { error_type: "rate_limit", message: msg };
     if (/timeout|timed out/i.test(msg)) return { error_type: "timeout", message: msg };
+    // Transport-layer failures: no HTTP status came back. Classified distinctly
+    // from `internal` so they aren't retried blind (see isTransient in ingest).
+    if (/connection error|fetch failed|ECONNRESET|ENOTFOUND|EAI_AGAIN|socket hang up/i.test(msg)) {
+      return { error_type: "network", message: msg };
+    }
     if (/no chunks|no extractable/i.test(msg)) return { error_type: "ingest_no_text", message: msg };
     if (/embedding|openai/i.test(msg)) return { error_type: "embedding", message: msg };
     if (/anthropic|claude/i.test(msg)) return { error_type: "model", message: msg };

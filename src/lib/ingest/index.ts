@@ -300,6 +300,13 @@ export async function getIngestJob(paperId: string): Promise<IngestJob | null> {
  * Transient errors are worth a retry. Non-transient errors (no extractable
  * text, validation, model schema rejection) will fail again on every retry, so
  * we surface them immediately and let the user fix the input.
+ *
+ * `network` (transport-layer failures: connection refused/reset, DNS, TLS) is
+ * deliberately NOT transient. In practice these come from a persistent cause —
+ * exhausted/rotated provider key, billing, an upstream outage — that affects
+ * every paper, so retrying just doubles load and cost without ever succeeding.
+ * Surface it fast with the real `cause` (see classifyError) and let the
+ * operator fix the root cause; a true one-off blip is rare enough to re-upload.
  */
 function isTransient(errorType: string): boolean {
   return errorType === "timeout" || errorType === "rate_limit" || errorType === "internal";
