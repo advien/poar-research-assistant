@@ -1,0 +1,49 @@
+name: Supabase Keep-Alive
+
+# Supabase free-tier projects pause after ~7 days without database activity.
+# This job issues a real PostgREST query (which executes SQL against Postgres,
+# even though RLS filters the result to empty for the anon role) every 5 days
+# so the project never freezes.
+#
+# Required repository secrets (Settings -> Secrets and variables -> Actions):
+#   SUPABASE_URL       e.g. https://<ref>.supabase.co   (same as NEXT_PUBLIC_SUPABASE_URL)
+#   SUPABASE_ANON_KEY  the public anon key              (same as NEXT_PUBLIC_SUPABASE_ANON_KEY)
+# The anon key is safe to store here — it is already shipped to the browser.
+
+on:
+  schedule:
+    # At 06:00 UTC on days 1,6,11,16,21,26 of the month. The largest gap
+    # between runs is 5 days, comfortably under Supabase's ~7-day pause window.
+    - cron: "0 6 */5 * *"
+  workflow_dispatch:
+
+jobs:
+  ping:
+    name: Query the database to keep the project active
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Ping Supabase
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${SUPABASE_URL:-}" ] || [ -z "${SUPABASE_ANON_KEY:-}" ]; then
+            echo "::error::Missing SUPABASE_URL or SUPABASE_ANON_KEY repository secret"
+            exit 1
+          fi
+          # A trivial select. RLS returns [] for the anon role, but the query
+          # still runs against Postgres, which is what counts as activity.
+          code=$(curl -sS --max-time 30 -o /tmp/body.txt -w "%{http_code}" \
+            "${SUPABASE_URL%/}/rest/v1/papers?select=id&limit=1" \
+            -H "apikey: ${SUPABASE_ANON_KEY}" \
+            -H "Authorization: Bearer ${SUPABASE_ANON_KEY}")
+          echo "HTTP ${code}"
+          cat /tmp/body.txt || true
+          echo
+          if [ "${code}" -lt 200 ] || [ "${code}" -ge 300 ]; then
+            echo "::error::Keep-alive query failed with HTTP ${code}"
+            exit 1
+          fi
+          echo "Supabase project pinged successfully."
