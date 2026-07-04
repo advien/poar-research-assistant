@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { createClient } from "@/lib/supabase/server";
 import { enqueueIngest } from "@/lib/ingest";
 import { IngestRequestSchema, safeParse } from "@/lib/api/schemas";
@@ -54,15 +55,55 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "not_found" }, { status: 404 });
   }
 
+  // `enqueueIngest` is the swap-in seam for a real queue (Cloudflare Queues /
+  // Inngest / Trigger.dev). Today it executes inline with bounded retries; the
+  // pipeline writes its own terminal status to `papers.status`, which the
+  // client already polls. We pass our request logger so the pipeline-stage
+  // logs share the same request_id and user_id.
+  const job = enqueueIngest(body.paper_id, {
+    logger: userLog.child({ paper_id: body.paper_id }),
+  });
+
+  // On Cloudflare, hand the pipeline to the platform's waitUntil so the HTTP
+  // response returns immediately instead of blocking the client for the whole
+  // parse -> embed -> summarise round-trip (and avoids the request timing out
+  // mid-ingest, which used to strand papers in a non-terminal status). The
+  // client only checks `res.ok` and tracks progress via `papers.status`, so
+  // the early 202 is not a breaking change.
+  //
+  // NOTE: waitUntil does NOT grant extra CPU — the background work still runs
+  // under the same Worker invocation's CPU cap. Very large PDFs still need a
+  // real queue (separate invocation). This is the low-cost win, not that fix.
+  //
+  // Outside Workers (local `next dev`, tests) getCloudflareContext throws; we
+  // fall back to awaiting inline and preserve the original response shape.
+  let ctx: { waitUntil(p: Promise<unknown>): void } | null = null;
   try {
-    // `enqueueIngest` is the swap-in seam for a real queue (Cloudflare Queues
-    // / Inngest / Trigger.dev). Today it executes inline with bounded retries;
-    // tomorrow it can post to a queue and return immediately. The route shape
-    // does not change in either case. We pass our request logger so the
-    // pipeline-stage logs share the same request_id and user_id.
-    const result = await enqueueIngest(body.paper_id, {
-      logger: userLog.child({ paper_id: body.paper_id }),
-    });
+    ctx = getCloudflareContext().ctx;
+  } catch {
+    ctx = null;
+  }
+
+  if (ctx) {
+    // Swallow rejections here: the pipeline has already persisted `failed`
+    // status + error to the row, so this catch is only to avoid an unhandled
+    // rejection and to leave a correlated log line.
+    ctx.waitUntil(
+      job.catch((e) =>
+        userLog.error("ingest.background_failed", {
+          ...classifyError(e),
+          paper_id: body.paper_id,
+        })
+      )
+    );
+    return NextResponse.json(
+      { ok: true, paper_id: body.paper_id, status: "pending" },
+      { status: 202 }
+    );
+  }
+
+  try {
+    const result = await job;
     return NextResponse.json({ ok: true, ...result });
   } catch (e) {
     const cls = classifyError(e);
