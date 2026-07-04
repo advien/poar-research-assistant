@@ -189,6 +189,13 @@ async function runIngest(paperId: string, log: Logger): Promise<IngestResult> {
     embedding: vectors[i],
   }));
 
+  // Idempotency: a retry or a manual re-ingest re-runs this function from the
+  // top. Clear any chunks left by a previous attempt so retrieval never sees
+  // duplicates. No-op on the first attempt. Kept close to the insert to
+  // minimise the window where a paper has zero chunks.
+  const { error: delErr } = await admin.from("chunks").delete().eq("paper_id", paperId);
+  if (delErr) throw new Error(`chunk cleanup failed: ${delErr.message}`);
+
   const BATCH = 100;
   for (let i = 0; i < rows.length; i += BATCH) {
     const slice = rows.slice(i, i + BATCH);
