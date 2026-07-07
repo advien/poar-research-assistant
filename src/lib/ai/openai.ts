@@ -1,3 +1,5 @@
+import { aiTimeoutSignal } from "./timeout";
+
 export const EMBEDDING_MODEL = "text-embedding-3-small";
 export const EMBEDDING_DIM = 1536;
 
@@ -31,6 +33,8 @@ export async function embedBatch(input: string[]): Promise<number[][]> {
       authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify({ model: EMBEDDING_MODEL, input }),
+    // Bound the call so a hung upstream can't pin the Worker until it's killed.
+    signal: aiTimeoutSignal(),
   });
 
   if (!res.ok) {

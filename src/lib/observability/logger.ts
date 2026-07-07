@@ -166,7 +166,11 @@ export function classifyError(err: unknown): { error_type: string; message: stri
       return { error_type: "auth", message: msg };
     }
     if (/rate.?limit|429/i.test(msg)) return { error_type: "rate_limit", message: msg };
-    if (/timeout|timed out/i.test(msg)) return { error_type: "timeout", message: msg };
+    // `AbortSignal.timeout` rejects with a TimeoutError / "aborted due to
+    // timeout" style message depending on runtime — treat all as timeout.
+    if (/timeout|timed out|aborted|AbortError|TimeoutError/i.test(msg)) {
+      return { error_type: "timeout", message: msg };
+    }
     // Transport-layer failures: no HTTP status came back. Classified distinctly
     // from `internal` so they aren't retried blind (see isTransient in ingest).
     if (/connection error|fetch failed|ECONNRESET|ENOTFOUND|EAI_AGAIN|socket hang up/i.test(msg)) {

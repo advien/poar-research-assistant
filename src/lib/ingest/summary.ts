@@ -1,5 +1,6 @@
 import { generateText } from "ai";
 import { chatModel } from "@/lib/ai/anthropic";
+import { aiTimeoutSignal } from "@/lib/ai/timeout";
 import { SUMMARY_SYSTEM_PROMPT } from "@/lib/ai/prompts";
 import type { ParsedPage } from "./parsePdf";
 
@@ -15,6 +16,7 @@ export async function summarisePaper(
 
   const { text } = await generateText({
     model: chatModel,
+    abortSignal: aiTimeoutSignal(),
     system: SUMMARY_SYSTEM_PROMPT,
     prompt: `Title: ${meta.title ?? "Unknown"}
 Abstract: ${meta.abstract ?? "n/a"}

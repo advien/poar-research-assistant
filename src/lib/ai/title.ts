@@ -1,5 +1,6 @@
 import { generateText } from "ai";
 import { chatModel } from "./anthropic";
+import { aiTimeoutSignal } from "./timeout";
 
 const TITLE_SYSTEM = `You write extremely short, descriptive titles for research-assistant chats
 about prosthetics, orthotics, and assistive / rehabilitation robotics literature. Reply with
@@ -28,6 +29,7 @@ export async function generateChatTitle(args: {
     const ctx = args.paperTitle ? `Paper context: "${args.paperTitle}"\n\n` : "";
     const { text } = await generateText({
       model: chatModel,
+      abortSignal: aiTimeoutSignal(),
       system: TITLE_SYSTEM,
       prompt: `${ctx}User asked:\n${args.userMessage.slice(0, 600)}\n\nAssistant answered:\n${args.assistantMessage.slice(0, 800)}\n\nGive me the title.`,
       temperature: 0.2,

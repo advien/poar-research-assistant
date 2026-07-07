@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { generateObject } from "ai";
 import { chatModel } from "@/lib/ai/anthropic";
+import { aiTimeoutSignal } from "@/lib/ai/timeout";
 import { METADATA_SYSTEM_PROMPT } from "@/lib/ai/prompts";
 import {
   CATEGORY_LABELS,
@@ -36,6 +37,7 @@ export async function extractMetadata(pages: ParsedPage[]): Promise<PaperMetadat
   const { object } = await generateObject({
     model: chatModel,
     schema: PaperMetadata,
+    abortSignal: aiTimeoutSignal(),
     system: METADATA_SYSTEM_PROMPT,
     prompt: `Extract bibliographic metadata from the first pages of this paper. The paper is from
 the prosthetics, orthotics, and assistive / rehabilitation robotics literature.
