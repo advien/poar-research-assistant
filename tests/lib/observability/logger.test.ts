@@ -100,8 +100,14 @@ describe("createRequestLogger", () => {
 describe("classifyError", () => {
   it.each([
     ["timeout", "Request timed out"],
+    ["timeout", "The operation was aborted due to timeout"],
+    ["timeout", "TimeoutError: signal timed out"],
     ["rate_limit", "429 rate-limited"],
     ["auth", "permission denied"],
+    ["conflict", "ingest already in progress for paper abc"],
+    ["network", "Connection error."],
+    ["network", "fetch failed"],
+    ["network", "getaddrinfo ENOTFOUND api.openai.com"],
     ["ingest_no_text", "no extractable text"],
     ["embedding", "openai error"],
     ["model", "claude generation failed"],
@@ -113,6 +119,26 @@ describe("classifyError", () => {
 
   it("classifies non-Error throws as 'unknown'", () => {
     expect(classifyError("oops").error_type).toBe("unknown");
+  });
+
+  it("folds err.cause into the message (SDK connection errors)", () => {
+    const cls = classifyError(
+      new Error("Connection error.", { cause: new Error("ECONNRESET") })
+    );
+    expect(cls.error_type).toBe("network");
+    expect(cls.message).toBe("Connection error. (ECONNRESET)");
+  });
+
+  it("stringifies a non-Error cause", () => {
+    const err = new Error("Connection error.");
+    (err as { cause?: unknown }).cause = "socket closed";
+    expect(classifyError(err).message).toBe("Connection error. (socket closed)");
+  });
+
+  it("classification sees the cause even when the outer message is opaque", () => {
+    // Outer message alone would be "internal"; the folded cause carries the signal.
+    const cls = classifyError(new Error("request failed", { cause: new Error("fetch failed") }));
+    expect(cls.error_type).toBe("network");
   });
 });
 
