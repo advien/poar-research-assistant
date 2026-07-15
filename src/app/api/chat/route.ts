@@ -121,15 +121,21 @@ export async function POST(req: Request) {
   }));
 
   // -------------------------------------------------------------------------
-  // 3. Persist user turn before streaming the assistant turn
+  // 3. Persist user turn before streaming the assistant turn. Keep the id so
+  // a failed generation can remove it again — otherwise the chat history
+  // accumulates question turns with no answer.
   // -------------------------------------------------------------------------
-  await supabase.from("messages").insert({
-    chat_id: chatId,
-    user_id: user.id,
-    role: "user",
-    content: lastUser.content,
-    citations: [],
-  });
+  const { data: userMsg } = await supabase
+    .from("messages")
+    .insert({
+      chat_id: chatId,
+      user_id: user.id,
+      role: "user",
+      content: lastUser.content,
+      citations: [],
+    })
+    .select("id")
+    .single();
 
   return createDataStreamResponse({
     execute: (writer) => {
@@ -212,6 +218,18 @@ export async function POST(req: Request) {
     onError(err) {
       const cls = classifyError(err);
       chatLog.error("chat.generation.failed", cls);
+      // Best-effort: remove the user turn persisted above so the history has
+      // no unanswered question stranded in it. Fire-and-forget — onError must
+      // return the client-facing message synchronously.
+      if (userMsg?.id) {
+        void supabase
+          .from("messages")
+          .delete()
+          .eq("id", userMsg.id)
+          .then(({ error }) => {
+            if (error) chatLog.warn("chat.orphan_cleanup_failed", { message: error.message });
+          });
+      }
       return cls.message;
     },
   });
