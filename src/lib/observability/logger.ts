@@ -165,6 +165,8 @@ export function classifyError(err: unknown): { error_type: string; message: stri
     if (/permission denied|unauthorized|RLS/i.test(msg)) {
       return { error_type: "auth", message: msg };
     }
+    // A second pipeline run lost the per-paper claim race (see ingestPaper).
+    if (/already in progress/i.test(msg)) return { error_type: "conflict", message: msg };
     if (/rate.?limit|429/i.test(msg)) return { error_type: "rate_limit", message: msg };
     // `AbortSignal.timeout` rejects with a TimeoutError / "aborted due to
     // timeout" style message depending on runtime — treat all as timeout.

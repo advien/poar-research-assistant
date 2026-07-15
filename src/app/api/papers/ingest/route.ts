@@ -89,12 +89,15 @@ export async function POST(req: Request) {
     // status + error to the row, so this catch is only to avoid an unhandled
     // rejection and to leave a correlated log line.
     ctx.waitUntil(
-      job.catch((e) =>
-        userLog.error("ingest.background_failed", {
-          ...classifyError(e),
-          paper_id: body.paper_id,
-        })
-      )
+      job.catch((e) => {
+        const cls = classifyError(e);
+        if (cls.error_type === "conflict") {
+          // Double submit lost the claim race; the winning run is healthy.
+          userLog.warn("ingest.conflict", { paper_id: body.paper_id });
+          return;
+        }
+        userLog.error("ingest.background_failed", { ...cls, paper_id: body.paper_id });
+      })
     );
     return NextResponse.json(
       { ok: true, paper_id: body.paper_id, status: "pending" },
@@ -107,6 +110,12 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: true, ...result });
   } catch (e) {
     const cls = classifyError(e);
+    if (cls.error_type === "conflict") {
+      // Lost the per-paper claim race (double submit): the other run is
+      // healthy and will finish; nothing failed.
+      userLog.warn("ingest.conflict", { paper_id: body.paper_id });
+      return NextResponse.json({ error: "ingest_in_progress" }, { status: 409 });
+    }
     userLog.error("ingest.failed", { ...cls, paper_id: body.paper_id });
     return NextResponse.json({ error: "ingest_failed", detail: cls.message }, { status: 500 });
   }

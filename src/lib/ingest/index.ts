@@ -34,6 +34,22 @@ export type IngestOptions = {
 };
 
 /**
+ * Thrown when another pipeline run already owns the paper (double submit, or a
+ * manual re-ingest racing a retry). Deliberately NOT an ingest failure: the
+ * catch paths in ingestPaper must never write `failed` for it, or a stray
+ * second request would clobber the healthy run's status mid-flight.
+ */
+export class IngestAlreadyRunningError extends Error {
+  constructor(paperId: string) {
+    super(`ingest already in progress for paper ${paperId}`);
+    this.name = "IngestAlreadyRunningError";
+  }
+}
+
+/** Statuses that mean "a pipeline run currently owns this paper". */
+const ACTIVE_STATUSES: IngestStatus[] = ["parsing", "embedding", "summarizing", "retrying"];
+
+/**
  * Ingest a single paper end-to-end. Uses the service-role client because the
  * caller has already verified ownership in the API route.
  *
@@ -56,6 +72,40 @@ export async function ingestPaper(
   const log = (opts.logger ?? createLogger({ component: "ingest" })).child({
     paper_id: paperId,
   });
+
+  // ---------------------------------------------------------------------------
+  // Claim the paper atomically before any work. The conditional UPDATE is the
+  // lock: only one concurrent caller can transition the row out of a
+  // non-active status. A second submit (double click, or a manual re-ingest
+  // racing a retry's backoff window) sees zero updated rows and bails without
+  // touching the row, so it can never interleave with the owner's
+  // delete-chunks -> insert-chunks sequence or clobber its status writes.
+  // A claim orphaned by a dead Worker is freed by reap_stuck_ingests() (0007),
+  // after which re-ingest is possible again.
+  // ---------------------------------------------------------------------------
+  {
+    const admin = createAdminClient();
+    const { data: claimed, error: claimErr } = await admin
+      .from("papers")
+      .update({ status: "parsing" satisfies IngestStatus, ingest_progress_pct: 5, error: null })
+      .eq("id", paperId)
+      .not("status", "in", `(${ACTIVE_STATUSES.join(",")})`)
+      .select("id");
+    if (claimErr) throw new Error(`ingest claim failed: ${claimErr.message}`);
+    if (!claimed || claimed.length === 0) {
+      // Zero rows means either an active run owns the paper, or the row does
+      // not exist at all. Disambiguate so a missing paper isn't reported as a
+      // conflict (only reached on the rare contention/404 path).
+      const { data: row } = await admin
+        .from("papers")
+        .select("id,status")
+        .eq("id", paperId)
+        .maybeSingle();
+      if (!row) throw new Error(`paper not found: ${paperId}`);
+      log.warn("ingest.already_running", { current_status: row.status });
+      throw new IngestAlreadyRunningError(paperId);
+    }
+  }
 
   let lastErr: unknown;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
