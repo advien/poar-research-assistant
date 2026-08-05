@@ -1,0 +1,138 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="820" viewBox="0 0 1200 820" font-family="Segoe UI, Arial, sans-serif">
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="userSpaceOnUse">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#9ca3af"/>
+    </marker>
+    <marker id="arrowGreen" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="userSpaceOnUse">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#10b981"/>
+    </marker>
+  </defs>
+
+  <rect x="0" y="0" width="1200" height="820" fill="#ffffff"/>
+
+  <!-- Title -->
+  <text x="40" y="42" font-size="26" font-weight="700" fill="#111827">POAR Research Assistant — System Architecture</text>
+  <text x="40" y="68" font-size="14" fill="#6b7280">Single Cloudflare Worker · Supabase (Postgres + pgvector) · Claude generation · OpenAI embeddings</text>
+
+  <!-- ===================== Client ===================== -->
+  <rect x="40" y="150" width="210" height="112" rx="12" fill="#eff6ff" stroke="#3178C6" stroke-width="1.5"/>
+  <text x="145" y="184" font-size="17" font-weight="700" fill="#1e3a8a" text-anchor="middle">Browser</text>
+  <text x="145" y="208" font-size="12.5" fill="#3b5b86" text-anchor="middle">React 19 · Tailwind 4</text>
+  <text x="145" y="228" font-size="12.5" fill="#3b5b86" text-anchor="middle">RSC islands · AI SDK stream</text>
+  <text x="145" y="248" font-size="12.5" fill="#3b5b86" text-anchor="middle">Realtime subscriber</text>
+
+  <!-- Legend -->
+  <text x="40" y="312" font-size="12" font-weight="700" fill="#374151">Legend</text>
+  <line x1="40" y1="330" x2="78" y2="330" stroke="#9ca3af" stroke-width="1.6" marker-end="url(#arrow)"/>
+  <text x="86" y="334" font-size="11.5" fill="#6b7280">request · RPC · call</text>
+  <line x1="40" y1="352" x2="78" y2="352" stroke="#10b981" stroke-width="1.6" stroke-dasharray="5 4" marker-end="url(#arrowGreen)"/>
+  <text x="86" y="356" font-size="11.5" fill="#6b7280">realtime push (WebSocket)</text>
+
+  <!-- ===================== Cloudflare Worker ===================== -->
+  <rect x="300" y="108" width="470" height="452" rx="14" fill="#fafafa" stroke="#111827" stroke-width="1.8"/>
+  <text x="320" y="130" font-size="13.5" font-weight="700" fill="#111827">Cloudflare Worker · @opennextjs/cloudflare</text>
+
+  <!-- middleware -->
+  <rect x="320" y="142" width="430" height="42" rx="9" fill="#ffffff" stroke="#d1d5db"/>
+  <text x="535" y="168" font-size="13.5" font-weight="600" fill="#111827" text-anchor="middle">middleware.ts — auth gate (getUser, /login redirect)</text>
+
+  <!-- App Router -->
+  <rect x="320" y="196" width="430" height="52" rx="9" fill="#ffffff" stroke="#d1d5db"/>
+  <text x="535" y="219" font-size="14" font-weight="700" fill="#111827" text-anchor="middle">Next.js App Router</text>
+  <text x="535" y="238" font-size="12" fill="#6b7280" text-anchor="middle">RSC pages · route handlers (/api) · Zod validation · rate limiting</text>
+
+  <!-- Domain services -->
+  <text x="320" y="274" font-size="12" font-weight="700" fill="#374151">Domain services · src/lib</text>
+  <rect x="320" y="282" width="138" height="86" rx="9" fill="#f9fafb" stroke="#cbd5e1"/>
+  <text x="389" y="306" font-size="13" font-weight="700" fill="#111827" text-anchor="middle">Ingestion</text>
+  <text x="389" y="325" font-size="10.8" fill="#6b7280" text-anchor="middle">unpdf → chunk</text>
+  <text x="389" y="340" font-size="10.8" fill="#6b7280" text-anchor="middle">→ embed → summary</text>
+  <text x="389" y="357" font-size="10.8" fill="#6b7280" text-anchor="middle">claim-guard · dedupe</text>
+
+  <rect x="466" y="282" width="138" height="86" rx="9" fill="#f9fafb" stroke="#cbd5e1"/>
+  <text x="535" y="306" font-size="13" font-weight="700" fill="#111827" text-anchor="middle">AI SDK layer</text>
+  <text x="535" y="325" font-size="10.8" fill="#6b7280" text-anchor="middle">generateObject</text>
+  <text x="535" y="340" font-size="10.8" fill="#6b7280" text-anchor="middle">streamText · RAG</text>
+  <text x="535" y="357" font-size="10.8" fill="#6b7280" text-anchor="middle">timeouts</text>
+
+  <rect x="612" y="282" width="138" height="86" rx="9" fill="#f9fafb" stroke="#cbd5e1"/>
+  <text x="681" y="306" font-size="13" font-weight="700" fill="#111827" text-anchor="middle">Analyses</text>
+  <text x="681" y="325" font-size="10.8" fill="#6b7280" text-anchor="middle">summary · terms</text>
+  <text x="681" y="340" font-size="10.8" fill="#6b7280" text-anchor="middle">comparison</text>
+  <text x="681" y="357" font-size="10.8" fill="#6b7280" text-anchor="middle">cited · versioned</text>
+
+  <!-- Persistence -->
+  <rect x="320" y="384" width="430" height="50" rx="9" fill="#ffffff" stroke="#d1d5db"/>
+  <text x="535" y="405" font-size="13" font-weight="700" fill="#111827" text-anchor="middle">Supabase clients</text>
+  <text x="535" y="423" font-size="11.5" fill="#6b7280" text-anchor="middle">browser · RLS server · service-role (admin)</text>
+
+  <!-- Reliability band -->
+  <rect x="320" y="450" width="430" height="94" rx="9" fill="#eef2ff" stroke="#c7d2fe"/>
+  <text x="535" y="473" font-size="13" font-weight="700" fill="#3730a3" text-anchor="middle">Reliability &amp; Ops</text>
+  <text x="535" y="493" font-size="11.3" fill="#4338ca" text-anchor="middle">error classification · retries + backoff · stuck-ingest reaper (pg_cron)</text>
+  <text x="535" y="510" font-size="11.3" fill="#4338ca" text-anchor="middle">structured logs · rag_traces · request timeouts</text>
+  <text x="535" y="527" font-size="11.3" fill="#4338ca" text-anchor="middle">TypeScript regression evals · Python DeepEval over traces</text>
+
+  <!-- ===================== AI providers ===================== -->
+  <rect x="810" y="108" width="350" height="126" rx="14" fill="#fdf6f3" stroke="#d97757" stroke-width="1.6"/>
+  <text x="830" y="130" font-size="13.5" font-weight="700" fill="#9a3412">AI providers</text>
+
+  <rect x="828" y="140" width="314" height="42" rx="9" fill="#ffffff" stroke="#d97757"/>
+  <text x="985" y="160" font-size="13" font-weight="700" fill="#7c2d12" text-anchor="middle">Anthropic — Claude Sonnet</text>
+  <text x="985" y="176" font-size="10.8" fill="#9a3412" text-anchor="middle">metadata · summary · chat · title</text>
+
+  <rect x="828" y="188" width="314" height="42" rx="9" fill="#ffffff" stroke="#6b46c1"/>
+  <text x="985" y="208" font-size="13" font-weight="700" fill="#4c1d95" text-anchor="middle">OpenAI — text-embedding-3-small</text>
+  <text x="985" y="224" font-size="10.8" fill="#5b21b6" text-anchor="middle">embeddings (via fetch, 1536-dim)</text>
+
+  <!-- ===================== Supabase ===================== -->
+  <rect x="810" y="300" width="350" height="322" rx="14" fill="#f0fdf6" stroke="#3ECF8E" stroke-width="1.6"/>
+  <text x="830" y="322" font-size="13.5" font-weight="700" fill="#065f46">Supabase</text>
+
+  <rect x="828" y="332" width="314" height="40" rx="9" fill="#ffffff" stroke="#10b981"/>
+  <text x="985" y="357" font-size="12.5" font-weight="600" fill="#065f46" text-anchor="middle">Auth — email magic link</text>
+
+  <rect x="828" y="380" width="314" height="118" rx="9" fill="#ffffff" stroke="#10b981"/>
+  <text x="985" y="403" font-size="13.5" font-weight="700" fill="#065f46" text-anchor="middle">Postgres + pgvector</text>
+  <text x="985" y="423" font-size="11" fill="#047857" text-anchor="middle">papers · chunks · chats · messages</text>
+  <text x="985" y="440" font-size="11" fill="#047857" text-anchor="middle">paper_summaries · terminology · comparisons</text>
+  <text x="985" y="457" font-size="11" fill="#047857" text-anchor="middle">rag_traces</text>
+  <text x="985" y="478" font-size="11" fill="#047857" text-anchor="middle">RLS · match_chunks() HNSW · pg_cron reaper</text>
+
+  <rect x="828" y="506" width="314" height="40" rx="9" fill="#ffffff" stroke="#10b981"/>
+  <text x="985" y="531" font-size="12.5" font-weight="600" fill="#065f46" text-anchor="middle">Storage — private papers/ bucket</text>
+
+  <rect x="828" y="554" width="314" height="46" rx="9" fill="#ffffff" stroke="#10b981"/>
+  <text x="985" y="576" font-size="12.5" font-weight="700" fill="#065f46" text-anchor="middle">Realtime — postgres_changes</text>
+  <text x="985" y="591" font-size="10.6" fill="#047857" text-anchor="middle">library grid live status, no polling</text>
+
+  <!-- ===================== Edges ===================== -->
+  <!-- Browser -> Worker -->
+  <line x1="250" y1="205" x2="300" y2="220" stroke="#9ca3af" stroke-width="1.8" marker-end="url(#arrow)"/>
+  <text x="258" y="196" font-size="11" fill="#6b7280">HTTPS</text>
+
+  <!-- internal vertical flow -->
+  <line x1="535" y1="184" x2="535" y2="196" stroke="#9ca3af" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="535" y1="248" x2="535" y2="280" stroke="#9ca3af" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="535" y1="368" x2="535" y2="384" stroke="#9ca3af" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- Worker -> Anthropic (generate) -->
+  <path d="M770,300 C812,300 800,161 826,161" fill="none" stroke="#9ca3af" stroke-width="1.6" marker-end="url(#arrow)"/>
+  <text x="775" y="292" font-size="10.5" fill="#6b7280">generate</text>
+
+  <!-- Worker -> OpenAI (embed) -->
+  <path d="M770,345 C812,345 806,209 826,209" fill="none" stroke="#9ca3af" stroke-width="1.6" marker-end="url(#arrow)"/>
+  <text x="775" y="362" font-size="10.5" fill="#6b7280">embed</text>
+
+  <!-- clients -> Auth (session) -->
+  <path d="M750,398 C786,398 802,352 826,352" fill="none" stroke="#9ca3af" stroke-width="1.6" marker-end="url(#arrow)"/>
+  <text x="756" y="372" font-size="10.5" fill="#6b7280">auth</text>
+
+  <!-- persistence -> Supabase (SQL/Storage) -->
+  <path d="M750,420 C786,420 800,432 826,432" fill="none" stroke="#9ca3af" stroke-width="1.8" marker-end="url(#arrow)"/>
+  <text x="754" y="452" font-size="10.5" fill="#6b7280">SQL · Storage (RLS)</text>
+
+  <!-- Realtime -> Browser (dashed) -->
+  <path d="M828,577 C560,577 300,720 145,720 L145,262" fill="none" stroke="#10b981" stroke-width="1.7" stroke-dasharray="6 4" marker-end="url(#arrowGreen)"/>
+  <text x="360" y="740" font-size="11" fill="#059669">Realtime — live ingest status pushed to the library grid</text>
+</svg>
