@@ -45,8 +45,8 @@
   <text x="320" y="274" font-size="12" font-weight="700" fill="#374151">Domain services · src/lib</text>
   <rect x="320" y="282" width="138" height="86" rx="9" fill="#f9fafb" stroke="#cbd5e1"/>
   <text x="389" y="306" font-size="13" font-weight="700" fill="#111827" text-anchor="middle">Ingestion</text>
-  <text x="389" y="325" font-size="10.8" fill="#6b7280" text-anchor="middle">unpdf → chunk</text>
-  <text x="389" y="340" font-size="10.8" fill="#6b7280" text-anchor="middle">→ embed → summary</text>
+  <text x="389" y="325" font-size="10.8" fill="#6b7280" text-anchor="middle">unpdf → chunk →</text>
+  <text x="389" y="340" font-size="10.8" fill="#6b7280" text-anchor="middle">embed → summary</text>
   <text x="389" y="357" font-size="10.8" fill="#6b7280" text-anchor="middle">claim-guard · dedupe</text>
 
   <rect x="466" y="282" width="138" height="86" rx="9" fill="#f9fafb" stroke="#cbd5e1"/>
@@ -118,19 +118,19 @@
 
   <!-- Worker -> Anthropic (generate) -->
   <path d="M770,300 C812,300 800,161 826,161" fill="none" stroke="#9ca3af" stroke-width="1.6" marker-end="url(#arrow)"/>
-  <text x="775" y="292" font-size="10.5" fill="#6b7280">generate</text>
+  <text x="788" y="246" font-size="10.5" fill="#6b7280" text-anchor="middle" transform="rotate(-68 788 246)">generate</text>
 
-  <!-- Worker -> OpenAI (embed) -->
+  <!-- Worker -> OpenAI (embed text) -->
   <path d="M770,345 C812,345 806,209 826,209" fill="none" stroke="#9ca3af" stroke-width="1.6" marker-end="url(#arrow)"/>
-  <text x="775" y="362" font-size="10.5" fill="#6b7280">embed</text>
+  <text x="790" y="312" font-size="10.5" fill="#6b7280" text-anchor="middle" transform="rotate(-68 790 312)">embed text</text>
 
   <!-- clients -> Auth (session) -->
   <path d="M750,398 C786,398 802,352 826,352" fill="none" stroke="#9ca3af" stroke-width="1.6" marker-end="url(#arrow)"/>
-  <text x="756" y="372" font-size="10.5" fill="#6b7280">auth</text>
+  <text x="789" y="368" font-size="10.5" fill="#6b7280" text-anchor="middle" transform="rotate(-31 789 368)">auth</text>
 
   <!-- persistence -> Supabase (SQL/Storage) -->
   <path d="M750,420 C786,420 800,432 826,432" fill="none" stroke="#9ca3af" stroke-width="1.8" marker-end="url(#arrow)"/>
-  <text x="754" y="452" font-size="10.5" fill="#6b7280">SQL · Storage (RLS)</text>
+  <text x="790" y="450" font-size="9.5" fill="#6b7280" text-anchor="middle">SQL ·<tspan x="790" dy="12">Storage</tspan><tspan x="790" dy="12">(RLS)</tspan></text>
 
   <!-- Realtime -> Browser (dashed, orthogonal) -->
   <path d="M828,577 L145,577 L145,276" fill="none" stroke="#10b981" stroke-width="1.7" stroke-dasharray="6 4" marker-end="url(#arrowGreen)"/>
