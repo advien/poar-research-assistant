@@ -151,6 +151,10 @@ Required env vars (same as `.env.local`):
 Can be triggered manually from the Actions tab via `workflow_dispatch` — useful
 to score a backlog of traces immediately after adding the pipeline.
 
+> **Note:** GitHub automatically disables scheduled workflows after 60 days without
+> repository activity (the same applies to `supabase-keepalive.yml`). If the weekly
+> run stops, any commit to the repo or **Actions → Enable workflow** restores it.
+
 Secrets required in the repo (Settings → Secrets → Actions):
 `NEXT_PUBLIC_SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `OPENAI_API_KEY`.
 
